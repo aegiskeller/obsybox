@@ -65,11 +65,11 @@ void loop() {
  
     serialin = Serial.readStringUntil('#');
 
-    Serial.print("I received: ");
-    Serial.println(serialin);
+    //Serial.print("I received: ");
+    //Serial.println(serialin);
      
     if (serialin == "open"){ 
-      Serial.println("opening - set motors on");
+      //Serial.println("opening - set motors on");
       // Perform a slow start by ramping up the speed
       // do this by incrementing the PWM value
 	    digitalWrite(in1, LOW);
@@ -85,7 +85,7 @@ void loop() {
     }
    
     else if (serialin == "close"){
-      Serial.println("closing - set motors on");
+      //Serial.println("closing - set motors on");
       // Perform a slow start by ramping up the speed
       // do this by incrementing the PWM value
       digitalWrite(in1, HIGH);
