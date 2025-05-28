@@ -26,7 +26,7 @@ async def main():
     print("Turning device on...")
     await device.on()
 
-    print("Waiting 2 seconds...")
+    print("Waiting 20 seconds...")
     await asyncio.sleep(20)
 
     print("Turning device off...")
