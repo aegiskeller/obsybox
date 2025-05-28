@@ -1,0 +1,3 @@
+For my debugging -- For some reason the driver for the serial chip CD430 is bent on the Win box. This was done on mac.
+
+I had to change the app_httpd to point to the right LED it was set to 22 and this module needs 4
