@@ -1,19 +1,3 @@
-/*********
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-cam-video-streaming-web-server-camera-home-assistant/
-  
-  IMPORTANT!!! 
-   - Select Board "AI Thinker ESP32-CAM"
-   - GPIO 0 must be connected to GND to upload a sketch
-   - After connecting GPIO 0 to GND, press the ESP32-CAM on-board RESET button to put your board in flashing mode
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*********/
-
 #include "esp_camera.h"
 #include <WiFi.h>
 
@@ -30,7 +14,7 @@
 // Select camera model
 // ===================
 //#define CAMERA_MODEL_WROVER_KIT // Has PSRAM
-//define CAMERA_MODEL_ESP_EYE  // Has PSRAM
+//#define CAMERA_MODEL_ESP_EYE  // Has PSRAM
 //#define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 //#define CAMERA_MODEL_M5STACK_PSRAM // Has PSRAM
 //#define CAMERA_MODEL_M5STACK_V2_PSRAM // M5Camera version B Has PSRAM
@@ -48,177 +32,22 @@
 //#define CAMERA_MODEL_DFRobot_FireBeetle2_ESP32S3 // Has PSRAM
 //#define CAMERA_MODEL_DFRobot_Romeo_ESP32S3 // Has PSRAM
 #include "camera_pins.h"
+#include "arduino_secrets.h"
 
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-#include "arduino_secrets.h"
 const char *ssid = SECRET_SSID;
 const char *password = SECRET_PASS;
 
-// Not tested with this model
-//#define CAMERA_MODEL_WROVER_KIT
+// Set your Static IP address
+IPAddress local_IP(192, 168, 1, 148);
+// Set your Gateway IP address
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 0, 0);
 
-#if defined(CAMERA_MODEL_WROVER_KIT)
-  #define PWDN_GPIO_NUM    -1
-  #define RESET_GPIO_NUM   -1
-  #define XCLK_GPIO_NUM    21
-  #define SIOD_GPIO_NUM    26
-  #define SIOC_GPIO_NUM    27
-  
-  #define Y9_GPIO_NUM      35
-  #define Y8_GPIO_NUM      34
-  #define Y7_GPIO_NUM      39
-  #define Y6_GPIO_NUM      36
-  #define Y5_GPIO_NUM      19
-  #define Y4_GPIO_NUM      18
-  #define Y3_GPIO_NUM       5
-  #define Y2_GPIO_NUM       4
-  #define VSYNC_GPIO_NUM   25
-  #define HREF_GPIO_NUM    23
-  #define PCLK_GPIO_NUM    22
-
-#elif defined(CAMERA_MODEL_M5STACK_PSRAM)
-  #define PWDN_GPIO_NUM     -1
-  #define RESET_GPIO_NUM    15
-  #define XCLK_GPIO_NUM     27
-  #define SIOD_GPIO_NUM     25
-  #define SIOC_GPIO_NUM     23
-  
-  #define Y9_GPIO_NUM       19
-  #define Y8_GPIO_NUM       36
-  #define Y7_GPIO_NUM       18
-  #define Y6_GPIO_NUM       39
-  #define Y5_GPIO_NUM        5
-  #define Y4_GPIO_NUM       34
-  #define Y3_GPIO_NUM       35
-  #define Y2_GPIO_NUM       32
-  #define VSYNC_GPIO_NUM    22
-  #define HREF_GPIO_NUM     26
-  #define PCLK_GPIO_NUM     21
-
-#elif defined(CAMERA_MODEL_M5STACK_WITHOUT_PSRAM)
-  #define PWDN_GPIO_NUM     -1
-  #define RESET_GPIO_NUM    15
-  #define XCLK_GPIO_NUM     27
-  #define SIOD_GPIO_NUM     25
-  #define SIOC_GPIO_NUM     23
-  
-  #define Y9_GPIO_NUM       19
-  #define Y8_GPIO_NUM       36
-  #define Y7_GPIO_NUM       18
-  #define Y6_GPIO_NUM       39
-  #define Y5_GPIO_NUM        5
-  #define Y4_GPIO_NUM       34
-  #define Y3_GPIO_NUM       35
-  #define Y2_GPIO_NUM       17
-  #define VSYNC_GPIO_NUM    22
-  #define HREF_GPIO_NUM     26
-  #define PCLK_GPIO_NUM     21
-
-#elif defined(CAMERA_MODEL_AI_THINKER)
-  #define PWDN_GPIO_NUM     32
-  #define RESET_GPIO_NUM    -1
-  #define XCLK_GPIO_NUM      0
-  #define SIOD_GPIO_NUM     26
-  #define SIOC_GPIO_NUM     27
-  
-  #define Y9_GPIO_NUM       35
-  #define Y8_GPIO_NUM       34
-  #define Y7_GPIO_NUM       39
-  #define Y6_GPIO_NUM       36
-  #define Y5_GPIO_NUM       21
-  #define Y4_GPIO_NUM       19
-  #define Y3_GPIO_NUM       18
-  #define Y2_GPIO_NUM        5
-  #define VSYNC_GPIO_NUM    25
-  #define HREF_GPIO_NUM     23
-  #define PCLK_GPIO_NUM     22
-#else
-  #error "Camera model not selected"
-#endif
-
-static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
-static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
-static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
-
-httpd_handle_t stream_httpd = NULL;
-
-static esp_err_t stream_handler(httpd_req_t *req){
-  camera_fb_t * fb = NULL;
-  esp_err_t res = ESP_OK;
-  size_t _jpg_buf_len = 0;
-  uint8_t * _jpg_buf = NULL;
-  char * part_buf[64];
-
-  res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
-  if(res != ESP_OK){
-    return res;
-  }
-
-  while(true){
-    fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      res = ESP_FAIL;
-    } else {
-      if(fb->width > 400){
-        if(fb->format != PIXFORMAT_JPEG){
-          bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
-          esp_camera_fb_return(fb);
-          fb = NULL;
-          if(!jpeg_converted){
-            Serial.println("JPEG compression failed");
-            res = ESP_FAIL;
-          }
-        } else {
-          _jpg_buf_len = fb->len;
-          _jpg_buf = fb->buf;
-        }
-      }
-    }
-    if(res == ESP_OK){
-      size_t hlen = snprintf((char *)part_buf, 64, _STREAM_PART, _jpg_buf_len);
-      res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
-    }
-    if(res == ESP_OK){
-      res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
-    }
-    if(res == ESP_OK){
-      res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-    }
-    if(fb){
-      esp_camera_fb_return(fb);
-      fb = NULL;
-      _jpg_buf = NULL;
-    } else if(_jpg_buf){
-      free(_jpg_buf);
-      _jpg_buf = NULL;
-    }
-    if(res != ESP_OK){
-      break;
-    }
-    //Serial.printf("MJPG: %uB\n",(uint32_t)(_jpg_buf_len));
-  }
-  return res;
-}
-
-void startCameraServer(){
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.server_port = 80;
-
-  httpd_uri_t index_uri = {
-    .uri       = "/",
-    .method    = HTTP_GET,
-    .handler   = stream_handler,
-    .user_ctx  = NULL
-  };
-  
-  //Serial.printf("Starting web server on port: '%d'\n", config.server_port);
-  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &index_uri);
-  }
-}
+void startCameraServer();
+void setupLedFlash(int pin);
 
 void setup() {
   Serial.begin(115200);
@@ -272,8 +101,13 @@ void setup() {
     config.fb_count = 2;
 #endif
   }
-  
-  // Camera init
+
+#if defined(CAMERA_MODEL_ESP_EYE)
+  pinMode(13, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
+#endif
+
+  // camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
@@ -305,7 +139,9 @@ void setup() {
 #if defined(LED_GPIO_NUM)
   setupLedFlash(LED_GPIO_NUM);
 #endif
-
+  if(!WiFi.config(local_IP, gateway, subnet)) {
+    Serial.println("STA Failed to configure");
+  }
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
 
@@ -316,12 +152,12 @@ void setup() {
   }
   Serial.println("");
   Serial.println("WiFi connected");
-  
-  Serial.print("Camera Stream Ready! Go to: http://");
-  Serial.print(WiFi.localIP());
-  
-  // Start streaming web server
+
   startCameraServer();
+
+  Serial.print("Camera Ready! Use 'http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("' to connect");
 }
 
 void loop() {
