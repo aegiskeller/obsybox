@@ -1,13 +1,14 @@
 #include <DHT.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <math.h>
 
 // Pin definitions
 #define DHTPIN 2        // DHT11 data pin connected to NodeMCU D4 
 #define DHTTYPE DHT11   // DHT 11
 #define LIGHT_SENSOR_PIN A0 // Light sensor connected to analog pin A0
 
-#define READ_INTERVAL 2000 // ms
+#define READ_INTERVAL 10000 // ms
 #define HISTORY_DURATION 3600000UL // 1 hour in ms
 #define HISTORY_SIZE (HISTORY_DURATION / READ_INTERVAL)
 // WiFi credentials
@@ -28,6 +29,15 @@ int historyCount = 0;
 
 DHT dht(DHTPIN, DHTTYPE);
 ESP8266WebServer server(80);
+
+// Dew point calculation function (Magnus formula)
+float calculateDewPoint(float tempC, float humidity) {
+  // Constants for Magnus formula
+  const float a = 17.62;
+  const float b = 243.12;
+  float gamma = log(humidity / 100.0) + (a * tempC) / (b + tempC);
+  return (b * gamma) / (a - gamma);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -53,6 +63,24 @@ void setup() {
   // Setup web server
   server.on("/", handleRoot);
   server.on("/data", handleData);
+  server.on("/temperature", []() {
+    float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
+    server.send(200, "text/plain", String(temperature, 1));
+  });
+  server.on("/humidity", []() {
+    float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
+    server.send(200, "text/plain", String(humidity, 1));
+  });
+  server.on("/lightlevel", []() {
+    int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
+    server.send(200, "text/plain", String(lightValue));
+  });
+  server.on("/dewpoint", []() {
+    float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
+    float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
+    float dewpoint = calculateDewPoint(temperature, humidity);
+    server.send(200, "text/plain", String(dewpoint, 1));
+  });
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -78,6 +106,7 @@ void handleRoot() {
   float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
   float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
   int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
+  float dewpoint = calculateDewPoint(temperature, humidity);
 
   String html = "<!DOCTYPE html><html><head><title>Weather Station</title>"
     "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
@@ -87,10 +116,12 @@ void handleRoot() {
     "<p>Temperature: " + String(temperature) + " &deg;C</p>"
     "<p>Humidity: " + String(humidity) + " %</p>"
     "<p>Light: " + String(lightValue) + "</p>"
+    "<p>Dew Point: " + String(dewpoint) + " &deg;C</p>"
     "<div style='display:flex;flex-wrap:wrap;'>"
     "<div><canvas id='tempChart' width='300' height='200'></canvas></div>"
     "<div><canvas id='humChart' width='300' height='200'></canvas></div>"
     "<div><canvas id='lightChart' width='300' height='200'></canvas></div>"
+    "<div><canvas id='dewChart' width='300' height='200'></canvas></div>"
     "</div>"
     "<script>"
     "fetch('/data').then(r=>r.json()).then(data=>{"
@@ -103,6 +134,9 @@ void handleRoot() {
     "options:{scales:{x:{display:true,title:{display:true,text:'Time (min ago)'}}}}});"
     "new Chart(document.getElementById('lightChart').getContext('2d'),{"
     "type:'line',data:{labels:labels,datasets:[{label:'Light',data:data.lights,borderColor:'orange',fill:false}]},"
+    "options:{scales:{x:{display:true,title:{display:true,text:'Time (min ago)'}}}}});"
+    "new Chart(document.getElementById('dewChart').getContext('2d'),{"
+    "type:'line',data:{labels:labels,datasets:[{label:'Dew Point (C)',data:data.dewpoints,borderColor:'green',fill:false}]},"
     "options:{scales:{x:{display:true,title:{display:true,text:'Time (min ago)'}}}}});"
     "});"
     "</script>"
@@ -131,6 +165,13 @@ void handleData() {
   for (int i = 0; i < historyCount; i++) {
     int idx = (start + i) % HISTORY_SIZE;
     json += String(history[idx].lightValue);
+    if (i < historyCount - 1) json += ",";
+  }
+  json += "],\"dewpoints\":[";
+  for (int i = 0; i < historyCount; i++) {
+    int idx = (start + i) % HISTORY_SIZE;
+    float dewpoint = calculateDewPoint(history[idx].temperature, history[idx].humidity);
+    json += String(dewpoint, 1);
     if (i < historyCount - 1) json += ",";
   }
   json += "],\"timestamps\":[";
