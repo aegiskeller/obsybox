@@ -106,29 +106,30 @@ void handleRoot() {
 // Serve the last hour's data as JSON for the chart
 void handleData() {
   String json = "{";
+  int start = (historyIndex - historyCount + HISTORY_SIZE) % HISTORY_SIZE;
+
   json += "\"temperatures\":[";
   for (int i = 0; i < historyCount; i++) {
-    int idx = (historyIndex + i) % HISTORY_SIZE;
+    int idx = (start + i) % HISTORY_SIZE;
     json += String(history[idx].temperature, 1);
     if (i < historyCount - 1) json += ",";
   }
   json += "],\"humidities\":[";
   for (int i = 0; i < historyCount; i++) {
-    int idx = (historyIndex + i) % HISTORY_SIZE;
+    int idx = (start + i) % HISTORY_SIZE;
     json += String(history[idx].humidity, 1);
     if (i < historyCount - 1) json += ",";
   }
   json += "],\"lights\":[";
   for (int i = 0; i < historyCount; i++) {
-    int idx = (historyIndex + i) % HISTORY_SIZE;
+    int idx = (start + i) % HISTORY_SIZE;
     json += String(history[idx].lightValue);
     if (i < historyCount - 1) json += ",";
   }
   json += "],\"timestamps\":[";
   unsigned long now = millis();
   for (int i = 0; i < historyCount; i++) {
-    int idx = (historyIndex + i) % HISTORY_SIZE;
-    // Show time as minutes ago
+    int idx = (start + i) % HISTORY_SIZE;
     unsigned long minsAgo = (now - history[idx].timestamp) / 60000;
     json += "\"" + String(minsAgo) + "\"";
     if (i < historyCount - 1) json += ",";
