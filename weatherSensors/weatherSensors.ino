@@ -8,8 +8,8 @@
 #define DHTTYPE DHT11   // DHT 11
 #define LIGHT_SENSOR_PIN A0 // Light sensor connected to analog pin A0
 
-#define READ_INTERVAL 10000 // ms
-#define HISTORY_DURATION 3600000UL // 1 hour in ms
+#define READ_INTERVAL 60000 // ms
+#define HISTORY_DURATION 1800000UL // 1/2 hour in ms
 #define HISTORY_SIZE (HISTORY_DURATION / READ_INTERVAL)
 // WiFi credentials
 #include "arduino_secrets.h"
@@ -115,77 +115,74 @@ void handleRoot() {
   int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
   float dewpoint = calculateDewPoint(temperature, humidity);
 
-  // Find min/max for scaling
-  float tmin = 1000, tmax = -1000, hmin = 1000, hmax = -1000, lmin = 1024, lmax = -1, dmin = 1000, dmax = -1000;
-  int start = (historyIndex - historyCount + HISTORY_SIZE) % HISTORY_SIZE;
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    float t = history[idx].temperature;
-    float h = history[idx].humidity;
-    int l = history[idx].lightValue;
-    float d = calculateDewPoint(t, h);
-    if (!isnan(t)) { if (t < tmin) tmin = t; if (t > tmax) tmax = t; }
-    if (!isnan(h)) { if (h < hmin) hmin = h; if (h > hmax) hmax = h; }
-    if (l < lmin) lmin = l; if (l > lmax) lmax = l;
-    if (!isnan(d)) { if (d < dmin) dmin = d; if (d > dmax) dmax = d; }
-  }
-  if (tmax == tmin) tmax = tmin + 1;
-  if (hmax == hmin) hmax = hmin + 1;
-  if (lmax == lmin) lmax = lmin + 1;
-  if (dmax == dmin) dmax = dmin + 1;
+  String html = R"rawliteral(
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Weather Station</title>
+      <meta http-equiv='refresh' content='300'>
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+      <style>
+        body { font-family: sans-serif; }
+        .chart-container { width: 90vw; max-width: 700px; margin: 30px auto; }
+      </style>
+    </head>
+    <body>
+      <h1>Weather Station</h1>
+      <p>Temperature: )rawliteral" + String(temperature, 1) + R"rawliteral(&deg;C</p>
+      <p>Humidity: )rawliteral" + String(humidity, 1) + R"rawliteral( %</p>
+      <p>Light: )rawliteral" + String(lightValue) + R"rawliteral(</p>
+      <p>Dew Point: )rawliteral" + String(dewpoint, 1) + R"rawliteral(&deg;C</p>
+      <div class="chart-container"><canvas id="tempChart"></canvas></div>
+      <div class="chart-container"><canvas id="humChart"></canvas></div>
+      <div class="chart-container"><canvas id="lightChart"></canvas></div>
+      <div class="chart-container"><canvas id="dewChart"></canvas></div>
+      <script>
+        async function fetchData() {
+          const res = await fetch('/data');
+          return await res.json();
+        }
+        function minsAgoLabels(count) {
+          let arr = [];
+          for (let i = count-1; i >= 0; i--) arr.push(i + " min ago");
+          return arr;
+        }
+        fetchData().then(data => {
+          let labels = minsAgoLabels(data.temperatures.length);
+          new Chart(document.getElementById('tempChart'), {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [{label: 'Temperature (°C)', data: data.temperatures, borderColor: 'red', fill: false}]
+            }
+          });
+          new Chart(document.getElementById('humChart'), {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [{label: 'Humidity (%)', data: data.humidities, borderColor: 'blue', fill: false}]
+            }
+          });
+          new Chart(document.getElementById('lightChart'), {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [{label: 'Light', data: data.lights, borderColor: 'orange', fill: false}]
+            }
+          });
+          new Chart(document.getElementById('dewChart'), {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [{label: 'Dew Point (°C)', data: data.dewpoints, borderColor: 'green', fill: false}]
+            }
+          });
+        });
+      </script>
+    </body>
+    </html>
+  )rawliteral";
 
-  String html = "<!DOCTYPE html><html><head><title>Weather Station</title>"
-    "<meta http-equiv='refresh' content='60'>"
-    "<style>svg{margin:20px;}</style>"
-    "</head><body>"
-    "<h1>Weather Station</h1>"
-    "<p>Temperature: " + String(temperature) + " &deg;C</p>"
-    "<p>Humidity: " + String(humidity) + " %</p>"
-    "<p>Light: " + String(lightValue) + "</p>"
-    "<p>Dew Point: " + String(dewpoint) + " &deg;C</p>";
-
-  // SVG for Temperature
-  html += "<h3>Temperature (&deg;C)</h3><svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'><polyline fill='none' stroke='red' stroke-width='2' points='";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    int x = (historyCount > 1) ? (i * 600) / (historyCount - 1) : 0;
-    int y = 180 - (int)(160 * (history[idx].temperature - tmin) / (tmax - tmin));
-    html += String(x) + "," + String(y) + " ";
-  }
-  html += "' /></svg>";
-
-  // SVG for Humidity
-  html += "<h3>Humidity (%)</h3><svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'><polyline fill='none' stroke='blue' stroke-width='2' points='";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    int x = (historyCount > 1) ? (i * 600) / (historyCount - 1) : 0;
-    int y = 180 - (int)(160 * (history[idx].humidity - hmin) / (hmax - hmin));
-    html += String(x) + "," + String(y) + " ";
-  }
-  html += "' /></svg>";
-
-  // SVG for Light
-  html += "<h3>Light Level</h3><svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'><polyline fill='none' stroke='orange' stroke-width='2' points='";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    int x = (historyCount > 1) ? (i * 600) / (historyCount - 1) : 0;
-    int y = 180 - (int)(160 * (history[idx].lightValue - lmin) / (lmax - lmin));
-    html += String(x) + "," + String(y) + " ";
-  }
-  html += "' /></svg>";
-
-  // SVG for Dew Point
-  html += "<h3>Dew Point (&deg;C)</h3><svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'><polyline fill='none' stroke='green' stroke-width='2' points='";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    float d = calculateDewPoint(history[idx].temperature, history[idx].humidity);
-    int x = (historyCount > 1) ? (i * 600) / (historyCount - 1) : 0;
-    int y = 180 - (int)(160 * (d - dmin) / (dmax - dmin));
-    html += String(x) + "," + String(y) + " ";
-  }
-  html += "' /></svg>";
-
-  html += "</body></html>";
   server.send(200, "text/html", html);
 }
 
