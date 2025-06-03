@@ -177,7 +177,7 @@ void loop() {
   unsigned long now = millis();
   // Sample every minute
   if (now - lastSampleTime > 60000 || lastSampleTime == 0) {
-    const int NUM_SAMPLES = 5;
+    const int NUM_SAMPLES = 100;
     float humiditySum = 0;
     float temperatureSum = 0;
     int anemometerSum = 0;
@@ -193,7 +193,7 @@ void loop() {
         anemometerSum += a;
         validSamples++;
       }
-      delay(200); // Short delay between samples
+      delay(500); // Short delay between samples
     }
 
     float avgHumidity = validSamples > 0 ? humiditySum / validSamples : NAN;

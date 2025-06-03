@@ -81,6 +81,7 @@ void setup() {
     float dewpoint = calculateDewPoint(temperature, humidity);
     server.send(200, "text/plain", String(dewpoint, 1));
   });
+  //server.on("/favicon.ico", handleFavicon);
   server.begin();
   Serial.println("HTTP server started");
 }
