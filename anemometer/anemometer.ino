@@ -33,11 +33,13 @@ float lastAvgAnemometer = NAN;
 void handleRoot() {
   float temperature = tempHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
   float humidity = humHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
+  float windspeed = lastAvgAnemometer; // Use the latest averaged anemometer value
 
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Weather Station</title></head><body>";
   html += "<h1>Current Readings</h1>";
   html += "<p>Temperature: " + String(temperature, 1) + " &deg;C</p>";
   html += "<p>Humidity: " + String(humidity, 1) + " %</p>";
+  html += "<p>Wind Speed (ADC): " + String(windspeed, 1) + "</p>";
 
   // SVG plot for temperature and humidity
   html += "<h2>Last 30 Minutes</h2>";
