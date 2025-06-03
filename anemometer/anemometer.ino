@@ -6,7 +6,7 @@
 #define DHTTYPE DHT22
 #define ANEMOMETER_PIN A0
 
-#include <arduino_secrets.h>
+#include "arduino_secrets.h"
 const char* ssid = SECRET_SSID;
 const char* password = SECRET_PASS;
 
