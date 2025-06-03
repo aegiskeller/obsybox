@@ -92,7 +92,7 @@ void handleRoot() {
 
   // --- Wind Speed SVG Plot with Axes, Ticks, and Grid Lines ---
   html += "<h2>Last 30 Minutes (Wind Speed)</h2>";
-  html += "<svg width='640' height='220' style='background:#f0f0f0;border:1px solid #ccc'>";
+  html += "<svg width='640' height='220' style='background:#f0f0f0;border:1px solid #ccc\">";
   html += "<g>";
   for (int i = 0; i <= 5; i++) {
     int y = 30 + i * 32;
