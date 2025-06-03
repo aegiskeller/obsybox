@@ -39,9 +39,11 @@ float lastAvgAnemometer = NAN;
 void handleRoot() {
   float temperature = tempHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
   float humidity = humHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
-  float windspeed = lastAvgAnemometer; // Use the latest averaged anemometer value
+  float windspeed = lastAvgAnemometer;
 
-  String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Weather Station</title></head><body>";
+  String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Weather Station</title>";
+  html += "<meta http-equiv='refresh' content='60'>";
+  html += "</head><body>";
   html += "<h1>Current Readings</h1>";
   html += "<p>Temperature: " + String(temperature, 1) + " &deg;C</p>";
   html += "<p>Humidity: " + String(humidity, 1) + " %</p>";
@@ -112,7 +114,7 @@ void handleRoot() {
   // Plot wind speed (green)
   html += "<polyline fill='none' stroke='green' stroke-width='2' points='";
   for (int i = 0; i < HISTORY_SIZE; i++) {
-    int idx = (historyIndex + i) % HISTORY_SIZE;
+    int idx = (historyIndex + i) % HISTORY_SIZE; // oldest to newest
     if (!isnan(anemometerHistory[idx])) {
       int x = 40 + i * 19;
       int y = 190 - (int)(160 * (anemometerHistory[idx] - amin) / (amax - amin));
