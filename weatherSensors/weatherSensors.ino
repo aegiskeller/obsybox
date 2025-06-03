@@ -86,15 +86,22 @@ void setup() {
 }
 
 void loop() {
-  // Read sensors
+  static unsigned long lastHistorySave = 0;
+
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
   int lightValue = analogRead(LIGHT_SENSOR_PIN);
 
+  unsigned long now = millis();
+
   if (!isnan(temperature) && !isnan(humidity)) {
-    history[historyIndex] = {temperature, humidity, lightValue, millis()};
-    historyIndex = (historyIndex + 1) % HISTORY_SIZE;
-    if (historyCount < HISTORY_SIZE) historyCount++;
+    // Store to history every 60 seconds
+    if (now - lastHistorySave >= 60000UL || lastHistorySave == 0) {
+      history[historyIndex] = {temperature, humidity, lightValue, now};
+      historyIndex = (historyIndex + 1) % HISTORY_SIZE;
+      if (historyCount < HISTORY_SIZE) historyCount++;
+      lastHistorySave = now;
+    }
   }
 
   server.handleClient();
@@ -109,7 +116,7 @@ void handleRoot() {
   float dewpoint = calculateDewPoint(temperature, humidity);
 
   String html = "<!DOCTYPE html><html><head><title>Weather Station</title>"
-    "<meta http-equiv='refresh' content='10'>"
+    "<meta http-equiv='refresh' content='60'>"
     "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
     "<style>canvas{margin:20px;}</style>"
     "</head><body>"
