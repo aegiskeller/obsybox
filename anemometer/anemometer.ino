@@ -42,41 +42,47 @@ void handleRoot() {
   html += "<p>Humidity: " + String(humidity, 1) + " %</p>";
   html += "<p>Wind Speed (ADC): " + String(windspeed, 1) + "</p>";
 
-  // SVG plot for temperature and humidity
+  // --- Temperature & Humidity SVG Plot with Axes, Ticks, and Grid Lines ---
   html += "<h2>Last 30 Minutes (Temperature & Humidity)</h2>";
-  html += "<svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'>";
-  float tmin = 1000, tmax = -1000, hmin = 1000, hmax = -1000;
-  for (int i = 0; i < HISTORY_SIZE; i++) {
-    if (!isnan(tempHistory[i])) {
-      if (tempHistory[i] < tmin) tmin = tempHistory[i];
-      if (tempHistory[i] > tmax) tmax = tempHistory[i];
-    }
-    if (!isnan(humHistory[i])) {
-      if (humHistory[i] < hmin) hmin = humHistory[i];
-      if (humHistory[i] > hmax) hmax = humHistory[i];
-    }
+  html += "<svg width='640' height='220' style='background:#f0f0f0;border:1px solid #ccc'>";
+  html += "<g>"; // Group for axes and grid
+
+  // Draw Y grid lines and ticks (5 intervals)
+  for (int i = 0; i <= 5; i++) {
+    int y = 30 + i * 32; // 30 to 190 over 160px
+    html += "<line x1='40' y1='" + String(y) + "' x2='620' y2='" + String(y) + "' stroke='#ccc' stroke-width='1'/>";
+    html += "<line x1='37' y1='" + String(y) + "' x2='43' y2='" + String(y) + "' stroke='#888' stroke-width='2'/>";
+    // Temperature scale (left)
+    float tval = tmax - (tmax - tmin) * (float)i / 5.0;
+    html += "<text x='5' y='" + String(y + 5) + "' font-size='12' fill='red'>" + String(tval, 1) + "</text>";
+    // Humidity scale (right)
+    float hval = hmax - (hmax - hmin) * (float)i / 5.0;
+    html += "<text x='625' y='" + String(y + 5) + "' font-size='12' fill='blue' text-anchor='start'>" + String(hval, 1) + "</text>";
   }
-  if (tmax == tmin) tmax = tmin + 1;
-  if (hmax == hmin) hmax = hmin + 1;
+  // Draw axes
+  html += "<line x1='40' y1='30' x2='40' y2='190' stroke='#888' stroke-width='2'/>";
+  html += "<line x1='40' y1='190' x2='620' y2='190' stroke='#888' stroke-width='2'/>";
+  html += "</g>";
 
   // Plot temperature (red)
   html += "<polyline fill='none' stroke='red' stroke-width='2' points='";
   for (int i = 0; i < HISTORY_SIZE; i++) {
     int idx = (historyIndex + i) % HISTORY_SIZE;
     if (!isnan(tempHistory[idx])) {
-      int x = i * 20;
-      int y = 180 - (int)(160 * (tempHistory[idx] - tmin) / (tmax - tmin));
+      int x = 40 + i * 19;
+      int y = 190 - (int)(160 * (tempHistory[idx] - tmin) / (tmax - tmin));
       html += String(x) + "," + String(y) + " ";
     }
   }
   html += "' />";
+
   // Plot humidity (blue)
   html += "<polyline fill='none' stroke='blue' stroke-width='2' points='";
   for (int i = 0; i < HISTORY_SIZE; i++) {
     int idx = (historyIndex + i) % HISTORY_SIZE;
     if (!isnan(humHistory[idx])) {
-      int x = i * 20;
-      int y = 180 - (int)(160 * (humHistory[idx] - hmin) / (hmax - hmin));
+      int x = 40 + i * 19;
+      int y = 190 - (int)(160 * (humHistory[idx] - hmin) / (hmax - hmin));
       html += String(x) + "," + String(y) + " ";
     }
   }
@@ -84,25 +90,27 @@ void handleRoot() {
   html += "</svg>";
   html += "<p><span style='color:red'>Red</span>: Temperature (&deg;C), <span style='color:blue'>Blue</span>: Humidity (%)</p>";
 
-  // --- Wind Speed SVG Plot ---
+  // --- Wind Speed SVG Plot with Axes, Ticks, and Grid Lines ---
   html += "<h2>Last 30 Minutes (Wind Speed)</h2>";
-  html += "<svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'>";
-  float amin = 1024, amax = -1;
-  for (int i = 0; i < HISTORY_SIZE; i++) {
-    if (!isnan(anemometerHistory[i])) {
-      if (anemometerHistory[i] < amin) amin = anemometerHistory[i];
-      if (anemometerHistory[i] > amax) amax = anemometerHistory[i];
-    }
+  html += "<svg width='640' height='220' style='background:#f0f0f0;border:1px solid #ccc'>";
+  html += "<g>";
+  for (int i = 0; i <= 5; i++) {
+    int y = 30 + i * 32;
+    html += "<line x1='40' y1='" + String(y) + "' x2='620' y2='" + String(y) + "' stroke='#ccc' stroke-width='1'/>";
+    html += "<line x1='37' y1='" + String(y) + "' x2='43' y2='" + String(y) + "' stroke='#888' stroke-width='2'/>";
+    float aval = amax - (amax - amin) * (float)i / 5.0;
+    html += "<text x='5' y='" + String(y + 5) + "' font-size='12' fill='green'>" + String(aval, 1) + "</text>";
   }
-  if (amax == amin) amax = amin + 1;
-
+  html += "<line x1='40' y1='30' x2='40' y2='190' stroke='#888' stroke-width='2'/>";
+  html += "<line x1='40' y1='190' x2='620' y2='190' stroke='#888' stroke-width='2'/>";
+  html += "</g>";
   // Plot wind speed (green)
   html += "<polyline fill='none' stroke='green' stroke-width='2' points='";
   for (int i = 0; i < HISTORY_SIZE; i++) {
     int idx = (historyIndex + i) % HISTORY_SIZE;
     if (!isnan(anemometerHistory[idx])) {
-      int x = i * 20;
-      int y = 180 - (int)(160 * (anemometerHistory[idx] - amin) / (amax - amin));
+      int x = 40 + i * 19;
+      int y = 190 - (int)(160 * (anemometerHistory[idx] - amin) / (amax - amin));
       html += String(x) + "," + String(y) + " ";
     }
   }
