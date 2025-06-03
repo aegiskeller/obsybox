@@ -141,6 +141,30 @@ void handleWindspeed() {
   server.send(200, "text/plain", String(lastAvgAnemometer, 2));
 }
 
+void handleData() {
+  String json = "{";
+  json += "\"temperature\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(tempHistory[idx])) json += String(tempHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
+  }
+  json += "],\"humidity\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(humHistory[idx])) json += String(humHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
+  }
+  json += "],\"windspeed\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(anemometerHistory[idx])) json += String(anemometerHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
+  }
+  json += "]}";
+  server.send(200, "application/json", json);
+}
+
 void setup() {
   Serial.begin(115200);
   dht.begin();
@@ -168,6 +192,7 @@ void setup() {
   server.on("/temperature", handleTemperature);
   server.on("/humidity", handleHumidity);
   server.on("/windspeed", handleWindspeed);
+  server.on("/data", handleData);
   server.begin();
 }
 
