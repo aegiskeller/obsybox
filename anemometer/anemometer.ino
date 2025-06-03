@@ -6,8 +6,9 @@
 #define DHTTYPE DHT22
 #define ANEMOMETER_PIN A0
 
-const char* ssid = "YOUR_SSID";
-const char* password = "YOUR_PASSWORD";
+#include <arduino_secrets.h>
+const char* ssid = SECRET_SSID;
+const char* password = SECRET_PASS;
 
 // Static IP configuration
 IPAddress staticIP(192, 168, 1, 124);
