@@ -39,6 +39,10 @@ float calculateDewPoint(float tempC, float humidity) {
   return (b * gamma) / (a - gamma);
 }
 
+// Function prototypes
+void handleRoot();
+void handleData();
+
 void setup() {
   Serial.begin(115200);
   dht.begin();
