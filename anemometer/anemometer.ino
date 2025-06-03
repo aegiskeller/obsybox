@@ -2,6 +2,11 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
+// --- Add min/max values for plotting ---
+float tmin = 0, tmax = 40;      // Temperature range (°C)
+float hmin = 0, hmax = 100;     // Humidity range (%)
+float amin = 0, amax = 1023;    // Anemometer ADC range
+
 #define DHTPIN 4
 #define DHTTYPE DHT22
 #define ANEMOMETER_PIN A0
