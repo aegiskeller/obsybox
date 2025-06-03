@@ -118,6 +118,7 @@ void handleRoot() {
   String html = "<!DOCTYPE html><html><head><title>Weather Station</title>"
     "<meta http-equiv='refresh' content='60'>"
     "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
+    "<script src='https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0'></script>"
     "<style>canvas{margin:20px;}</style>"
     "</head><body>"
     "<h1>Weather Station</h1>"
