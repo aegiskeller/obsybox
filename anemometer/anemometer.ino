@@ -22,6 +22,7 @@ ESP8266WebServer server(80);
 #define HISTORY_SIZE 30
 float tempHistory[HISTORY_SIZE];
 float humHistory[HISTORY_SIZE];
+float anemometerHistory[HISTORY_SIZE]; 
 int historyIndex = 0;
 unsigned long lastSampleTime = 0;
 
@@ -33,14 +34,16 @@ float lastAvgAnemometer = NAN;
 void handleRoot() {
   float temperature = tempHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
   float humidity = humHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
+  float windspeed = lastAvgAnemometer; // Use the latest averaged anemometer value
 
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Weather Station</title></head><body>";
   html += "<h1>Current Readings</h1>";
   html += "<p>Temperature: " + String(temperature, 1) + " &deg;C</p>";
   html += "<p>Humidity: " + String(humidity, 1) + " %</p>";
+  html += "<p>Wind Speed (ADC): " + String(windspeed, 1) + "</p>";
 
   // SVG plot for temperature and humidity
-  html += "<h2>Last 30 Minutes</h2>";
+  html += "<h2>Last 30 Minutes (Temperature & Humidity)</h2>";
   html += "<svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'>";
   float tmin = 1000, tmax = -1000, hmin = 1000, hmax = -1000;
   for (int i = 0; i < HISTORY_SIZE; i++) {
@@ -81,6 +84,32 @@ void handleRoot() {
   html += "</svg>";
   html += "<p><span style='color:red'>Red</span>: Temperature (&deg;C), <span style='color:blue'>Blue</span>: Humidity (%)</p>";
 
+  // --- Wind Speed SVG Plot ---
+  html += "<h2>Last 30 Minutes (Wind Speed)</h2>";
+  html += "<svg width='600' height='200' style='background:#f0f0f0;border:1px solid #ccc'>";
+  float amin = 1024, amax = -1;
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    if (!isnan(anemometerHistory[i])) {
+      if (anemometerHistory[i] < amin) amin = anemometerHistory[i];
+      if (anemometerHistory[i] > amax) amax = anemometerHistory[i];
+    }
+  }
+  if (amax == amin) amax = amin + 1;
+
+  // Plot wind speed (green)
+  html += "<polyline fill='none' stroke='green' stroke-width='2' points='";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(anemometerHistory[idx])) {
+      int x = i * 20;
+      int y = 180 - (int)(160 * (anemometerHistory[idx] - amin) / (amax - amin));
+      html += String(x) + "," + String(y) + " ";
+    }
+  }
+  html += "' />";
+  html += "</svg>";
+  html += "<p><span style='color:green'>Green</span>: Wind Speed (ADC)</p>";
+
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -105,6 +134,7 @@ void setup() {
   for (int i = 0; i < HISTORY_SIZE; i++) {
     tempHistory[i] = NAN;
     humHistory[i] = NAN;
+    anemometerHistory[i] = NAN; // <-- Add this line
   }
 
   WiFi.mode(WIFI_STA);
@@ -157,6 +187,7 @@ void loop() {
 
     tempHistory[historyIndex] = avgTemperature;
     humHistory[historyIndex] = avgHumidity;
+    anemometerHistory[historyIndex] = avgAnemometer; 
     historyIndex = (historyIndex + 1) % HISTORY_SIZE;
 
     // Store latest averages for API endpoints
