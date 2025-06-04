@@ -1,134 +1,81 @@
 #include <DHT.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 #include <math.h>
 
 // Pin definitions
-#define DHTPIN 2        // DHT11 data pin connected to NodeMCU D4 
+#define DHTPIN 5        // DHT11 data pin connected to NodeMCU D2
 #define DHTTYPE DHT11   // DHT 11
 #define LIGHT_SENSOR_PIN A0 // Light sensor connected to analog pin A0
 
-#define READ_INTERVAL 60000 // ms
-#define HISTORY_DURATION 1800000UL // 1/2 hour in ms
-#define HISTORY_SIZE (HISTORY_DURATION / READ_INTERVAL)
 // WiFi credentials
 #include "arduino_secrets.h"
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
-
-struct SensorReading {
-  float temperature;
-  float humidity;
-  int lightValue;
-  unsigned long timestamp;
-};
-
-SensorReading history[HISTORY_SIZE];
-int historyIndex = 0;
-int historyCount = 0;
-
+// define a fixed ip
+IPAddress local_ip(192, 168, 1, 184); // Set a fixed IP address
+IPAddress gateway(192, 168, 1, 1);    // Set the gateway IP address
+IPAddress subnet(255, 255, 255, 0);   // Set the subnet mask
+IPAddress dns(192, 168, 1, 1);        // Set the DNS server IP address
+// Initialize DHT sensor
 DHT dht(DHTPIN, DHTTYPE);
-ESP8266WebServer server(80);
+// use an async web server
+AsyncWebServer server(80);
+// Variables to store sensor data
+float temperature = 0.0;
+float humidity = 0.0;
+int lightLevel = 0;   
 
-// Dew point calculation function (Magnus formula)
-float calculateDewPoint(float tempC, float humidity) {
-  // Constants for Magnus formula
-  const float a = 17.62;
-  const float b = 243.12;
-  float gamma = log(humidity / 100.0) + (a * tempC) / (b + tempC);
-  return (b * gamma) / (a - gamma);
+#define HISTORY_SIZE 120
+float tempHistory[HISTORY_SIZE];
+float humHistory[HISTORY_SIZE];
+float lightHistory[HISTORY_SIZE];
+float dewHistory[HISTORY_SIZE];
+int historyIndex = 0;
+
+// Function prototype for calculateDewPoint
+float calculateDewPoint(float tempC, float hum);
+
+// Function to read sensor data
+void readSensors() {
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  int l = analogRead(LIGHT_SENSOR_PIN);
+
+  if (isnan(h) || isnan(t)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+  temperature = t;
+  humidity = h;
+  lightLevel = l;
+
+  // Update history arrays
+  tempHistory[historyIndex] = temperature;
+  humHistory[historyIndex] = humidity;
+  lightHistory[historyIndex] = lightLevel;
+  dewHistory[historyIndex] = calculateDewPoint(temperature, humidity);
+  historyIndex = (historyIndex + 1) % HISTORY_SIZE;
+
+  Serial.print("Temperature: ");
+  Serial.print(t);
+  Serial.print(" C, Humidity: ");
+  Serial.print(h);
+  Serial.print(" %, Light Level: ");
+  Serial.print(l);
+  Serial.println();
 }
 
-// Function prototypes
-void handleRoot();
-void handleData();
-
-void setup() {
-  Serial.begin(115200);
-  dht.begin();
-  pinMode(LIGHT_SENSOR_PIN, INPUT);
-
-  // Connect to WiFi with static IP
-  IPAddress local_IP(192, 168, 1, 123);      // Set your desired static IP
-  IPAddress gateway(192, 168, 1, 1);         // Set your network gateway
-  IPAddress subnet(255, 255, 255, 0);        // Set your subnet mask
-  IPAddress dns(8, 8, 8, 8);                 // Optional: set DNS
-
-  WiFi.config(local_IP, gateway, subnet, dns);
-  WiFi.begin(ssid, pass);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected. IP address: ");
-  Serial.println(WiFi.localIP());
-
-  // Setup web server
-  server.on("/", handleRoot);
-  server.on("/data", handleData);
-  server.on("/temperature", []() {
-    float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
-    server.send(200, "text/plain", String(temperature, 1));
-  });
-  server.on("/humidity", []() {
-    float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
-    server.send(200, "text/plain", String(humidity, 1));
-  });
-  server.on("/lightlevel", []() {
-    int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
-    server.send(200, "text/plain", String(lightValue));
-  });
-  server.on("/dewpoint", []() {
-    float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
-    float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
-    float dewpoint = calculateDewPoint(temperature, humidity);
-    server.send(200, "text/plain", String(dewpoint, 1));
-  });
-  //server.on("/favicon.ico", handleFavicon);
-  server.begin();
-  Serial.println("HTTP server started");
-}
-
-void loop() {
-  static unsigned long lastHistorySave = 0;
-  static unsigned long lastSample = 0;
-
-  unsigned long now = millis();
-
-  // Sample sensors as often as you like (e.g., every second)
-  static float temperature = NAN;
-  static float humidity = NAN;
-  static int lightValue = 0;
-
-  if (now - lastSample >= 1000 || lastSample == 0) { // sample every 1s
-    temperature = dht.readTemperature();
-    humidity = dht.readHumidity();
-    lightValue = analogRead(LIGHT_SENSOR_PIN);
-    lastSample = now;
-  }
-
-  // Store to history every READ_INTERVAL ms
-  if (!isnan(temperature) && !isnan(humidity)) {
-    if (now - lastHistorySave >= READ_INTERVAL || lastHistorySave == 0) {
-      history[historyIndex] = {temperature, humidity, lightValue, now};
-      historyIndex = (historyIndex + 1) % HISTORY_SIZE;
-      if (historyCount < HISTORY_SIZE) historyCount++;
-      lastHistorySave = now;
-    }
-  }
-
-  server.handleClient();
-}
-
-// Serve the main page with current values and a graph
-void handleRoot() {
+// Function to handle root URL
+void handleRoot(AsyncWebServerRequest *request) {
   String html = R"rawliteral(
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Weather Station</title>
-      <meta http-equiv='refresh' content='300'>
+      <meta charset='utf-8'>
+      <title>Weather Sensor Data</title>
+      <meta http-equiv='refresh' content='60'>
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
         body { font-family: sans-serif; }
@@ -136,30 +83,16 @@ void handleRoot() {
       </style>
     </head>
     <body>
-      <h1>Weather Station</h1>
-  )rawliteral";
-
-  if (historyCount > 0) {
-    float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
-    float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
-    int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
-    float dewpoint = calculateDewPoint(temperature, humidity);
-
-    html += "<p>Temperature: " + String(temperature, 1) + "&deg;C</p>";
-    html += "<p>Humidity: " + String(humidity, 1) + " %</p>";
-    html += "<p>Light: " + String(lightValue) + "</p>";
-    html += "<p>Dew Point: " + String(dewpoint, 1) + "&deg;C</p>";
-  } else {
-    html += "<p>No data yet. Please wait...</p>";
-  }
-
-  html += R"rawliteral(
+      <h1>Weather Sensor Data</h1>
+      <p>Temperature: )rawliteral" + String(temperature, 1) + R"rawliteral( C</p>
+      <p>Humidity: )rawliteral" + String(humidity, 1) + R"rawliteral( %</p>
+      <p>Light Level: )rawliteral" + String(lightLevel) + R"rawliteral(</p>
+      <p>Dew Point: )rawliteral" + String(calculateDewPoint(temperature, humidity), 1) + R"rawliteral( C</p>
       <div class="chart-container"><canvas id="tempChart"></canvas></div>
       <div class="chart-container"><canvas id="humChart"></canvas></div>
       <div class="chart-container"><canvas id="lightChart"></canvas></div>
-      <div class="chart-container"><canvas id="dewChart"></canvas></div>
       <script>
-        async function fetchData() {
+        async function fetchHistory() {
           const res = await fetch('/data');
           return await res.json();
         }
@@ -168,35 +101,33 @@ void handleRoot() {
           for (let i = count-1; i >= 0; i--) arr.push(i + " min ago");
           return arr;
         }
-        fetchData().then(data => {
-          let labels = minsAgoLabels(data.temperatures.length);
-          if (labels.length === 0) return;
+        fetchHistory().then(data => {
+          let labels = minsAgoLabels(data.temperature.length);
+          // Temperature + Dew Point on same chart
           new Chart(document.getElementById('tempChart'), {
             type: 'line',
             data: {
               labels: labels,
-              datasets: [{label: 'Temperature (°C)', data: data.temperatures, borderColor: 'red', fill: false}]
+              datasets: [
+                {label: 'Temperature (°C)', data: data.temperature, borderColor: 'red', fill: false},
+                {label: 'Dew Point (°C)', data: data.dewpoint, borderColor: 'green', fill: false}
+              ]
             }
           });
+          // Humidity chart
           new Chart(document.getElementById('humChart'), {
             type: 'line',
             data: {
               labels: labels,
-              datasets: [{label: 'Humidity (%)', data: data.humidities, borderColor: 'blue', fill: false}]
+              datasets: [{label: 'Humidity (%)', data: data.humidity, borderColor: 'blue', fill: false}]
             }
           });
+          // Light chart
           new Chart(document.getElementById('lightChart'), {
             type: 'line',
             data: {
               labels: labels,
-              datasets: [{label: 'Light', data: data.lights, borderColor: 'orange', fill: false}]
-            }
-          });
-          new Chart(document.getElementById('dewChart'), {
-            type: 'line',
-            data: {
-              labels: labels,
-              datasets: [{label: 'Dew Point (°C)', data: data.dewpoints, borderColor: 'green', fill: false}]
+              datasets: [{label: 'Light', data: data.light, borderColor: 'orange', fill: false}]
             }
           });
         });
@@ -204,48 +135,174 @@ void handleRoot() {
     </body>
     </html>
   )rawliteral";
+  request->send(200, "text/html", html);
+} 
 
-  server.send(200, "text/html", html);
+// Function to handle sensor data in JSON format
+void handleSensorData(AsyncWebServerRequest *request) {
+  String json = "{";
+  json += "\"temperature\": " + String(temperature) + ",";
+  json += "\"humidity\": " + String(humidity) + ",";
+  json += "\"lightLevel\": " + String(lightLevel);
+  json += "}";
+  request->send(200, "application/json", json);
 }
 
-// Serve the last hour's data as JSON for the chart
-void handleData() {
+// Function to handle historical data in JSON format
+void handleData(AsyncWebServerRequest *request) {
   String json = "{";
-  int start = (historyIndex - historyCount + HISTORY_SIZE) % HISTORY_SIZE;
-
-  json += "\"temperatures\":[";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    json += String(history[idx].temperature, 1);
-    if (i < historyCount - 1) json += ",";
+  json += "\"temperature\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(tempHistory[idx])) json += String(tempHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
   }
-  json += "],\"humidities\":[";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    json += String(history[idx].humidity, 1);
-    if (i < historyCount - 1) json += ",";
+  json += "],\"humidity\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(humHistory[idx])) json += String(humHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
   }
-  json += "],\"lights\":[";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    json += String(history[idx].lightValue);
-    if (i < historyCount - 1) json += ",";
+  json += "],\"light\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(lightHistory[idx])) json += String(lightHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
   }
-  json += "],\"dewpoints\":[";
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    float dewpoint = calculateDewPoint(history[idx].temperature, history[idx].humidity);
-    json += String(dewpoint, 1);
-    if (i < historyCount - 1) json += ",";
-  }
-  json += "],\"timestamps\":[";
-  unsigned long now = millis();
-  for (int i = 0; i < historyCount; i++) {
-    int idx = (start + i) % HISTORY_SIZE;
-    unsigned long minsAgo = (now - history[idx].timestamp) / 60000;
-    json += "\"" + String(minsAgo) + "\"";
-    if (i < historyCount - 1) json += ",";
+  json += "],\"dewpoint\":[";
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    int idx = (historyIndex + i) % HISTORY_SIZE;
+    if (!isnan(dewHistory[idx])) json += String(dewHistory[idx], 2); else json += "null";
+    if (i < HISTORY_SIZE - 1) json += ",";
   }
   json += "]}";
-  server.send(200, "application/json", json);
+  request->send(200, "application/json", json);
+}
+
+// Function to handle not found requests
+void handleNotFound(AsyncWebServerRequest *request) {
+  request->send(404, "text/plain", "Not Found");
+}
+
+// Setup function
+void setup() {
+  // Start Serial communication for debugging
+  Serial.begin(115200);
+  // Initialize DHT sensor
+  dht.begin();
+  // Connect to WiFi
+  WiFi.config(local_ip, gateway, subnet, dns);
+  WiFi.begin(ssid, pass);
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+  // Set up web server routes
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/sensor-data", HTTP_GET, handleSensorData);
+  server.on("/data", HTTP_GET, handleData);
+  server.onNotFound(handleNotFound);
+  // Start the server
+  server.begin();
+  Serial.println("HTTP server started");
+
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    tempHistory[i] = NAN;
+    humHistory[i] = NAN;
+    lightHistory[i] = NAN;
+    dewHistory[i] = NAN;
+  }
+  historyIndex = 0;
+  // Initialize sensor data
+  temperature = 0.0;
+  humidity = 0.0;
+  lightLevel = 0;
+}
+
+// Loop function
+void loop() {
+  static unsigned long lastSampleTime = 0;
+  static unsigned long sampleStartTime = 0;
+  static int sampleCount = 0;
+  static float humiditySum = 0;
+  static float temperatureSum = 0;
+  static int lightSum = 0;
+  static float dewSum = 0;
+  static int validSamples = 0;
+  static const int NUM_SAMPLES = 100;
+  static unsigned long lastSampleInterval = 0;
+
+  unsigned long now = millis();
+
+  // Start a new averaging cycle every minute
+  if ((now - lastSampleTime > 60000 || lastSampleTime == 0) && sampleCount == 0) {
+    sampleStartTime = now;
+    sampleCount = 0;
+    humiditySum = 0;
+    temperatureSum = 0;
+    lightSum = 0;
+    dewSum = 0;
+    validSamples = 0;
+    lastSampleInterval = 0;
+  }
+
+  // Take samples every 500ms until NUM_SAMPLES is reached
+  if (sampleCount < NUM_SAMPLES && (now - lastSampleInterval >= 500) && (sampleStartTime != 0)) {
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    int l = analogRead(LIGHT_SENSOR_PIN);
+    float d = calculateDewPoint(t, h);
+    if (!isnan(h) && !isnan(t)) {
+      humiditySum += h;
+      temperatureSum += t;
+      lightSum += l;
+      dewSum += d;
+      validSamples++;
+    }
+    sampleCount++;
+    lastSampleInterval = now;
+  }
+
+  // When enough samples have been taken, calculate averages and store
+  if (sampleCount == NUM_SAMPLES && sampleStartTime != 0) {
+    float avgHumidity = validSamples > 0 ? humiditySum / validSamples : NAN;
+    float avgTemperature = validSamples > 0 ? temperatureSum / validSamples : NAN;
+    float avgLight = validSamples > 0 ? (float)lightSum / validSamples : NAN;
+    float avgDew = validSamples > 0 ? dewSum / validSamples : NAN;
+
+    tempHistory[historyIndex] = avgTemperature;
+    humHistory[historyIndex] = avgHumidity;
+    lightHistory[historyIndex] = avgLight;
+    dewHistory[historyIndex] = avgDew;
+    historyIndex = (historyIndex + 1) % HISTORY_SIZE;
+
+    // Optionally store latest averages for API endpoints
+    temperature = avgTemperature;
+    humidity = avgHumidity;
+    lightLevel = avgLight;
+
+    Serial.print("Temperature: ");
+    Serial.print(avgTemperature);
+    Serial.print(" °C, Humidity: ");
+    Serial.print(avgHumidity);
+    Serial.print(" %, Light: ");
+    Serial.print(avgLight);
+    Serial.print(", Dew Point: ");
+    Serial.println(avgDew);
+
+    lastSampleTime = now;
+    sampleStartTime = 0;
+    sampleCount = 0;
+  }
+}
+
+float calculateDewPoint(float tempC, float hum) {
+  // Magnus formula
+  double a = 17.62, b = 243.12;
+  double gamma = log(hum / 100.0) + (a * tempC) / (b + tempC);
+  return (b * gamma) / (a - gamma);
 }
