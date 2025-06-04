@@ -174,28 +174,46 @@ void setup() {
 void loop() {
   server.handleClient();
 
+  static unsigned long lastSampleTime = 0;
+  static unsigned long sampleStartTime = 0;
+  static int sampleCount = 0;
+  static float humiditySum = 0;
+  static float temperatureSum = 0;
+  static int anemometerSum = 0;
+  static int validSamples = 0;
+  static const int NUM_SAMPLES = 100;
+  static unsigned long lastSampleInterval = 0;
+
   unsigned long now = millis();
-  // Sample every minute
-  if (now - lastSampleTime > 60000 || lastSampleTime == 0) {
-    const int NUM_SAMPLES = 100;
-    float humiditySum = 0;
-    float temperatureSum = 0;
-    int anemometerSum = 0;
-    int validSamples = 0;
 
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-      float h = dht.readHumidity();
-      float t = dht.readTemperature();
-      int a = analogRead(ANEMOMETER_PIN);
-      if (!isnan(h) && !isnan(t)) {
-        humiditySum += h;
-        temperatureSum += t;
-        anemometerSum += a;
-        validSamples++;
-      }
-      delay(500); // Short delay between samples
+  // Start a new averaging cycle every minute
+  if ((now - lastSampleTime > 60000 || lastSampleTime == 0) && sampleCount == 0) {
+    sampleStartTime = now;
+    sampleCount = 0;
+    humiditySum = 0;
+    temperatureSum = 0;
+    anemometerSum = 0;
+    validSamples = 0;
+    lastSampleInterval = 0;
+  }
+
+  // Take samples every 500ms until NUM_SAMPLES is reached
+  if (sampleCount < NUM_SAMPLES && (now - lastSampleInterval >= 500) && (sampleStartTime != 0)) {
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    int a = analogRead(ANEMOMETER_PIN);
+    if (!isnan(h) && !isnan(t)) {
+      humiditySum += h;
+      temperatureSum += t;
+      anemometerSum += a;
+      validSamples++;
     }
+    sampleCount++;
+    lastSampleInterval = now;
+  }
 
+  // When enough samples have been taken, calculate averages and store
+  if (sampleCount == NUM_SAMPLES && sampleStartTime != 0) {
     float avgHumidity = validSamples > 0 ? humiditySum / validSamples : NAN;
     float avgTemperature = validSamples > 0 ? temperatureSum / validSamples : NAN;
     float avgAnemometer = validSamples > 0 ? (float)anemometerSum / validSamples : NAN;
@@ -218,5 +236,7 @@ void loop() {
     Serial.println(avgAnemometer);
 
     lastSampleTime = now;
+    sampleStartTime = 0;
+    sampleCount = 0;
   }
 }

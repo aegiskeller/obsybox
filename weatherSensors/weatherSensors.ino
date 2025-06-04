@@ -92,16 +92,25 @@ void setup() {
 
 void loop() {
   static unsigned long lastHistorySave = 0;
-
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
-  int lightValue = analogRead(LIGHT_SENSOR_PIN);
+  static unsigned long lastSample = 0;
 
   unsigned long now = millis();
 
+  // Sample sensors as often as you like (e.g., every second)
+  static float temperature = NAN;
+  static float humidity = NAN;
+  static int lightValue = 0;
+
+  if (now - lastSample >= 1000 || lastSample == 0) { // sample every 1s
+    temperature = dht.readTemperature();
+    humidity = dht.readHumidity();
+    lightValue = analogRead(LIGHT_SENSOR_PIN);
+    lastSample = now;
+  }
+
+  // Store to history every READ_INTERVAL ms
   if (!isnan(temperature) && !isnan(humidity)) {
-    // Store to history every 60 seconds
-    if (now - lastHistorySave >= 60000UL || lastHistorySave == 0) {
+    if (now - lastHistorySave >= READ_INTERVAL || lastHistorySave == 0) {
       history[historyIndex] = {temperature, humidity, lightValue, now};
       historyIndex = (historyIndex + 1) % HISTORY_SIZE;
       if (historyCount < HISTORY_SIZE) historyCount++;
@@ -110,7 +119,6 @@ void loop() {
   }
 
   server.handleClient();
-  delay(READ_INTERVAL);
 }
 
 // Serve the main page with current values and a graph
