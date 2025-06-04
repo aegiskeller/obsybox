@@ -74,20 +74,63 @@ void handleRoot(AsyncWebServerRequest *request) {
     <html>
     <head>
       <meta charset='utf-8'>
-      <title>Weather Sensor Data</title>
+      <title>Wombat Weather Sensor Data</title>
+      <meta name='viewport' content='width=device-width, initial-scale=1'>
+      <meta name='description' content='Real-time weather sensor data from Wombat IoT'>
+      <meta name='keywords' content='weather, sensor, data, temperature, humidity, light'>
       <meta http-equiv='refresh' content='60'>
+      <link rel="icon" type="image/png" href="data:image/png;base64,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">
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
-        body { font-family: sans-serif; }
-        .chart-container { width: 90vw; max-width: 700px; margin: 30px auto; }
+        body {
+          font-family: sans-serif;
+          background: #181c24;
+          color: #e0e0e0;
+        }
+        .chart-container {
+          width: 90vw;
+          max-width: 700px;
+          margin: 30px auto;
+        }
+        h1, h2, h3 {
+          color: #b0b8c0;
+        }
+        .info {
+          font-size: 0.95em;
+          font-style: italic;
+          margin: 18px auto;
+          max-width: 700px;
+          background: #232837;
+          color: #b0b8c0;
+          border-radius: 8px;
+          padding: 10px 18px;
+          line-height: 1.5;
+          text-align: left;
+        }
+        a { color: #80bfff; }
+        canvas {
+          background: #232837;
+          border-radius: 8px;
+        }
       </style>
     </head>
     <body>
-      <h1>Weather Sensor Data</h1>
+      <h1>Wombat Weather Sensor Data</h1>
       <p>Temperature: )rawliteral" + String(temperature, 1) + R"rawliteral( C</p>
       <p>Humidity: )rawliteral" + String(humidity, 1) + R"rawliteral( %</p>
       <p>Light Level: )rawliteral" + String(lightLevel) + R"rawliteral(</p>
       <p>Dew Point: )rawliteral" + String(calculateDewPoint(temperature, humidity), 1) + R"rawliteral( C</p>
+      <div class="info">
+        <em>
+          ESP8266 weather station with DHT11 sensor and light sensor.<br>
+          Data sampled every minute, displayed in real-time.<br>
+          Last updated: )rawliteral" + String(millis() / 1000) + R"rawliteral( seconds ago.<br>
+          Static IP: )rawliteral" + local_ip.toString() + R"rawliteral(<br>
+          WiFi SSID: )rawliteral" + String(ssid) + R"rawliteral(<br>
+          Firmware: 1.0.0, History: 120 min, 60 samples/min.<br>
+          Charts below show the last 120 minutes of data.
+        </em>
+      </div>
       <div class="chart-container"><canvas id="tempChart"></canvas></div>
       <div class="chart-container"><canvas id="humChart"></canvas></div>
       <div class="chart-container"><canvas id="lightChart"></canvas></div>
