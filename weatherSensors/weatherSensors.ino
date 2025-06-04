@@ -123,11 +123,6 @@ void loop() {
 
 // Serve the main page with current values and a graph
 void handleRoot() {
-  float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
-  float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
-  int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
-  float dewpoint = calculateDewPoint(temperature, humidity);
-
   String html = R"rawliteral(
     <!DOCTYPE html>
     <html>
@@ -142,10 +137,23 @@ void handleRoot() {
     </head>
     <body>
       <h1>Weather Station</h1>
-      <p>Temperature: )rawliteral" + String(temperature, 1) + R"rawliteral(&deg;C</p>
-      <p>Humidity: )rawliteral" + String(humidity, 1) + R"rawliteral( %</p>
-      <p>Light: )rawliteral" + String(lightValue) + R"rawliteral(</p>
-      <p>Dew Point: )rawliteral" + String(dewpoint, 1) + R"rawliteral(&deg;C</p>
+  )rawliteral";
+
+  if (historyCount > 0) {
+    float temperature = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].temperature;
+    float humidity = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].humidity;
+    int lightValue = history[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE].lightValue;
+    float dewpoint = calculateDewPoint(temperature, humidity);
+
+    html += "<p>Temperature: " + String(temperature, 1) + "&deg;C</p>";
+    html += "<p>Humidity: " + String(humidity, 1) + " %</p>";
+    html += "<p>Light: " + String(lightValue) + "</p>";
+    html += "<p>Dew Point: " + String(dewpoint, 1) + "&deg;C</p>";
+  } else {
+    html += "<p>No data yet. Please wait...</p>";
+  }
+
+  html += R"rawliteral(
       <div class="chart-container"><canvas id="tempChart"></canvas></div>
       <div class="chart-container"><canvas id="humChart"></canvas></div>
       <div class="chart-container"><canvas id="lightChart"></canvas></div>
@@ -162,6 +170,7 @@ void handleRoot() {
         }
         fetchData().then(data => {
           let labels = minsAgoLabels(data.temperatures.length);
+          if (labels.length === 0) return;
           new Chart(document.getElementById('tempChart'), {
             type: 'line',
             data: {
