@@ -30,7 +30,7 @@
 // LED FLASH setup
 #if CONFIG_LED_ILLUMINATOR_ENABLED
 
-#define LED_LEDC_GPIO            22  //configure LED pin
+#define LED_LEDC_GPIO            4  //configure LED pin
 #define CONFIG_LED_MAX_INTENSITY 255
 
 int led_duty = 0;
