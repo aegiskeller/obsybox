@@ -14,3 +14,7 @@ Wiring diagram for the ZTS-3000-YUX-R01 rain sensor:
 ![image](https://github.com/user-attachments/assets/9bf2799b-9501-4f02-9be2-b0056b361316)
 
 Power is a 10-30VDC to BRN and BLK. Voltage supply from the microprocessor is supplied to WHT and relay sense is read from GRN.
+
+## problems with CH430?
+see here: https://forum.arduino.cc/t/a-fatal-esptool-py-error-occurred-cannot-configure-port-something-went-wrong/1225308/7
+This appears to be an issue with a driver update that affects those cheap and cheery clones with a CH430 chip for serial.
