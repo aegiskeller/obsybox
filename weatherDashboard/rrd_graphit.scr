@@ -1,0 +1,17 @@
+#!/bin/bash
+RRD_DB_PATH="/home/sckelle/Weather"
+
+rrdtool graph $RRD_DB_PATH/anemo_temp.png -a PNG --title "Anemometer Temperature" \
+--width 600 --height 200 \
+DEF:probe1=$RRD_DB_PATH/temperature.rrd:temperature:AVERAGE \
+LINE1:probe1#ff0000:'Temperature' \
+
+rrdtool graph $RRD_DB_PATH/anemo_hum.png -a PNG --title "Anemometer Humidity" \
+--width 600 --height 200 \
+DEF:probe2=$RRD_DB_PATH/humidity.rrd:humidity:AVERAGE \
+LINE1:probe2#00ff00:'Humidity' \
+
+rrdtool graph $RRD_DB_PATH/anemo_windspeed.png -a PNG --title "Anemometer Wind Speed" \
+--width 600 --height 200 \
+DEF:probe3=$RRD_DB_PATH/windspeed.rrd:windspeed:AVERAGE \
+LINE1:probe3#0000ff:'Wind Speed'
