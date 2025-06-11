@@ -86,6 +86,7 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
   <meta charset="UTF-8">
   <title>Rain Sensor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="10">
   <style>
     body {
       background: linear-gradient(135deg, #232526 0%, #414345 100%);
