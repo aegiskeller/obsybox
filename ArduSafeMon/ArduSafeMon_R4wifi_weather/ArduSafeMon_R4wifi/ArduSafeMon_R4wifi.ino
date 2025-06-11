@@ -291,13 +291,7 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
       if (tsEnd == -1) tsEnd = lastWeatherJson.indexOf("}", tsStart);
       String tsStr = lastWeatherJson.substring(tsStart, tsEnd);
       tsStr.trim();
-      double ts = tsStr.toDouble();
-      time_t t = (time_t)ts;
-      char timebuf[32];
-      // Format as "YYYY-MM-DD HH:MM:SS"
-      snprintf(timebuf, sizeof(timebuf), "%04d-%02d-%02d %02d:%02d:%02d",
-        year(t), month(t), day(t), hour(t), minute(t), second(t));
-      html += String("<div style='font-size:0.95em;color:#bbb;margin-top:1em;'>Last weather update: ") + timebuf + "</div>";
+      html += String("<div style='font-size:0.95em;color:#bbb;margin-top:1em;'>Last weather update (epoch): ") + tsStr + "</div>";
     }
 
     html += "</div>";
