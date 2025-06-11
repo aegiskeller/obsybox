@@ -1,0 +1,42 @@
+#!/bin/bash
+URL="http://192.168.1.183/temperature"
+
+RRD_DB="Weather/temperature.rrd"
+
+TEMPERATURE=$(curl -s $URL)
+
+if [ ! -f $RRD_DB ]; then
+	rrdtool create $RRD_DB --step 300 \
+	DS:temperature:GAUGE:600:U:U \
+	RRA:AVERAGE:0.5:1:576
+fi
+
+rrdtool update $RRD_DB N:$TEMPERATURE
+
+URL="http://192.168.1.183/humidity"
+
+RRD_DB="Weather/humidity.rrd"
+
+HUMIDITY=$(curl -s $URL)
+
+if [ ! -f $RRD_DB ]; then
+	rrdtool create $RRD_DB --step 300 \
+	DS:humidity:GAUGE:600:U:U \
+	RRA:AVERAGE:0.5:1:576
+fi
+
+rrdtool update $RRD_DB N:$HUMIDITY
+
+URL="http://192.168.1.183/windspeed"
+
+RRD_DB="Weather/windspeed.rrd"
+
+WINDSPEED=$(curl -s $URL)
+
+if [ ! -f $RRD_DB ]; then
+	rrdtool create $RRD_DB --step 300 \
+	DS:windspeed:GAUGE:600:U:U \
+	RRA:AVERAGE:0.5:1:576
+fi
+
+rrdtool update $RRD_DB N:$WINDSPEED
