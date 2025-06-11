@@ -1,6 +1,7 @@
 # here we scrape the weather data from openweathermap.org
 # we store this data and then serve it via a webserver
 # ArduSafeMon_R4wifi_weather then reads this data
+# flak app on http://192.168.1.3:8080/weather
 import requests
 import json
 import time
