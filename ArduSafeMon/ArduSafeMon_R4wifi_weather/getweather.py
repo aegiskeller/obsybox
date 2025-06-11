@@ -6,6 +6,7 @@ import requests
 import json
 import time
 import os
+import threading
 
 def get_weather(api_key, city):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
@@ -40,6 +41,16 @@ def load_weather_data(filename='weather.json'):
         print(f"No weather data file found: {filename}")
         return None 
 
+def periodic_weather_update(api_key, city, interval=600):
+    while True:
+        weather_data = get_weather(api_key, city)
+        if weather_data:
+            save_weather_data(weather_data)
+            print("Weather data updated.")
+        else:
+            print("Failed to update weather data.")
+        time.sleep(interval)
+
 def main():
     api_key = "f0a965789e5e7a3ec34b14d4ad4f2110"
     city = "Canberra"
@@ -50,7 +61,13 @@ def main():
         print("Failed to retrieve weather data.")
 
 if __name__ == "__main__":
-    main()
+    api_key = "f0a965789e5e7a3ec34b14d4ad4f2110"
+    city = "Canberra"
+
+    # Start periodic weather update in a background thread
+    updater = threading.Thread(target=periodic_weather_update, args=(api_key, city), daemon=True)
+    updater.start()
+
     # Load and print the weather data
     data = load_weather_data()
     if data:

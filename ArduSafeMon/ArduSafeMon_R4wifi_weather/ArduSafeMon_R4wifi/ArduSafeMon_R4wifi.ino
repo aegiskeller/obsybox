@@ -283,17 +283,6 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
     if (wind.length() > 0) html += "Wind Speed: " + wind + " m/s<br>";
     if (clouds.length() > 0) html += "Clouds: " + clouds + " %<br>";
 
-    // Add last weather update timestamp
-    int tsIdx = lastWeatherJson.indexOf("\"timestamp\":");
-    if (tsIdx > 0) {
-      int tsStart = tsIdx + 12;
-      int tsEnd = lastWeatherJson.indexOf("\n", tsStart);
-      if (tsEnd == -1) tsEnd = lastWeatherJson.indexOf("}", tsStart);
-      String tsStr = lastWeatherJson.substring(tsStart, tsEnd);
-      tsStr.trim();
-      html += String("<div style='font-size:0.95em;color:#bbb;margin-top:1em;'>Last weather update (epoch): ") + tsStr + "</div>";
-    }
-
     html += "</div>";
   } else {
     html += "<div class='weather'><em>Weather data unavailable</em></div>";
