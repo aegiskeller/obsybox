@@ -61,8 +61,8 @@ def main():
         print("Failed to retrieve weather data.")
 
 if __name__ == "__main__":
-    api_key = "f0a965789e5e7a3ec34b14d4ad4f2110"
-    city = "Canberra"
+    api_key = <your api key>
+    city = <your city>
 
     # Start periodic weather update in a background thread
     updater = threading.Thread(target=periodic_weather_update, args=(api_key, city), daemon=True)
