@@ -52,8 +52,8 @@ def periodic_weather_update(api_key, city, interval=600):
         time.sleep(interval)
 
 def main():
-    api_key = "f0a965789e5e7a3ec34b14d4ad4f2110"
-    city = "Canberra"
+    api_key = <your api>
+    city = <your city>
     weather_data = get_weather(api_key, city)
     if weather_data:
         save_weather_data(weather_data)
