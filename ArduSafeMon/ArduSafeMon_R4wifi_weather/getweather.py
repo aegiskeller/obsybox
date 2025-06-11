@@ -5,6 +5,7 @@ import requests
 import json
 import time
 import os
+
 def get_weather(api_key, city):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
     try:
@@ -15,6 +16,7 @@ def get_weather(api_key, city):
     except requests.exceptions.RequestException as e:
         print(f"Error fetching weather data: {e}")
         return None
+
 def save_weather_data(data, filename='weather.json'):
     # here we only keep some of the weather data
     simplified_data = {
@@ -36,6 +38,7 @@ def load_weather_data(filename='weather.json'):
     else:
         print(f"No weather data file found: {filename}")
         return None 
+
 def main():
     api_key = "f0a965789e5e7a3ec34b14d4ad4f2110"
     city = "Canberra"
@@ -44,6 +47,7 @@ def main():
         save_weather_data(weather_data)
     else:
         print("Failed to retrieve weather data.")
+
 if __name__ == "__main__":
     main()
     # Load and print the weather data
@@ -52,3 +56,21 @@ if __name__ == "__main__":
         print(json.dumps(data, indent=4))
     else:
         print("No weather data available.")
+
+    # --- Flask endpoint for serving weather data ---
+    try:
+        from flask import Flask, jsonify
+        app = Flask(__name__)
+
+        @app.route('/weather')
+        def serve_weather():
+            data = load_weather_data()
+            if data:
+                return jsonify(data)
+            else:
+                return jsonify({'error': 'No weather data available'}), 404
+
+        print("Starting Flask server on http://0.0.0.0:8080/weather")
+        app.run(host='0.0.0.0', port=8080)
+    except ImportError:
+        print("Flask is not installed. Run 'pip install flask' to enable the web endpoint.")
