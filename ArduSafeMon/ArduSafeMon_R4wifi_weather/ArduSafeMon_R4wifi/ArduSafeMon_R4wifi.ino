@@ -20,7 +20,7 @@ float averagedValue = 0;
 
 String lastWeatherJson = "";
 unsigned long lastWeatherFetch = 0;
-const unsigned long weatherFetchInterval = 30000; // 10 minutes in ms
+const unsigned long weatherFetchInterval = 60000 ; // 10 minutes in ms
 
 // --- Add these global variables at the top ---
 float maxClouds = 100;
@@ -55,7 +55,7 @@ void setup() {
   // Initialize samples array
   for (int i = 0; i < NUM_SAMPLES; i++) samples[i] = 0;
 
-  EEPROM.begin(64); // Initialize EEPROM (size in bytes)
+  //EEPROM.begin(64); // Initialize EEPROM (size in bytes)
   loadWeatherParamsFromEEPROM();
 }
 
@@ -93,7 +93,7 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
   <meta charset="UTF-8">
   <title>Rain Sensor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="10">
+  <meta http-equiv="refresh" content="30">
   <style>
     body {
       background: linear-gradient(135deg, #232526 0%, #414345 100%);
@@ -351,7 +351,7 @@ void saveWeatherParamsToEEPROM() {
   EEPROM.put(0, maxClouds);
   EEPROM.put(sizeof(float), maxWind);
   EEPROM.put(2 * sizeof(float), maxHumidity);
-  EEPROM.commit(); // Needed on some platforms, safe to call
+  // EEPROM.commit(); // Not needed on AVR/Uno R4, remove or comment out to fix error
 }
 
 void loadWeatherParamsFromEEPROM() {
@@ -449,7 +449,7 @@ void loop() {
       client.println(
         "<!DOCTYPE html><html lang='en'><head>"
         "<meta charset='UTF-8'>"
-        "<meta http-equiv='refresh' content='1'>"
+        "<meta http-equiv='refresh' content='5'>"
         "<title>404 Not Found</title>"
         "<style>"
         "body { background: linear-gradient(135deg, #232526 0%, #414345 100%); color: #fff; font-family: 'Segoe UI', Arial, sans-serif; min-height: 100vh; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }"
@@ -463,7 +463,7 @@ void loop() {
         "<div class='container'>"
         "<h2>404 Not Found</h2>"
         "<p>The page you requested was not found.</p>"
-        "<div class='refresh'>Page will refresh in 1 second.</div>"
+        "<div class='refresh'>Page will refresh in 5 seconds.</div>"
         "</div></body></html>"
       );
     }
