@@ -7,6 +7,7 @@ import json
 import time
 import os
 import threading
+from weather_secrets import API_KEY, CITY
 
 def get_weather(api_key, city):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
@@ -61,8 +62,8 @@ def main():
         print("Failed to retrieve weather data.")
 
 if __name__ == "__main__":
-    api_key = <your api key>
-    city = <your city>
+    api_key = API_KEY
+    city = CITY
 
     # Start periodic weather update in a background thread
     updater = threading.Thread(target=periodic_weather_update, args=(api_key, city), daemon=True)
