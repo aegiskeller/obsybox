@@ -2,6 +2,7 @@
 #include <WiFiS3.h>
 #include "arduino_secrets.h" // Make sure this defines ssid and pass
 #include <WiFiClient.h>
+#include <EEPROM.h>
 
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;        // your network password
@@ -53,6 +54,9 @@ void setup() {
 
   // Initialize samples array
   for (int i = 0; i < NUM_SAMPLES; i++) samples[i] = 0;
+
+  EEPROM.begin(64); // Initialize EEPROM (size in bytes)
+  loadWeatherParamsFromEEPROM();
 }
 
 // --- Add this function to parse user input from the web form ---
@@ -75,6 +79,9 @@ void handleSettingsUpdate(String req) {
     String val = req.substring(humidityIdx + 12, end > 0 ? end : req.length());
     maxHumidity = val.toFloat();
   }
+
+  // Save updated parameters to EEPROM
+  saveWeatherParamsToEEPROM();
 }
 
 // --- Update sendRootHtml to add the input boxes and form ---
@@ -340,6 +347,20 @@ String getWeatherFromFlask() {
   return payload;
 }
 
+void saveWeatherParamsToEEPROM() {
+  EEPROM.put(0, maxClouds);
+  EEPROM.put(sizeof(float), maxWind);
+  EEPROM.put(2 * sizeof(float), maxHumidity);
+  EEPROM.commit(); // Needed on some platforms, safe to call
+}
+
+void loadWeatherParamsFromEEPROM() {
+  EEPROM.get(0, maxClouds);
+  EEPROM.get(sizeof(float), maxWind);
+  EEPROM.get(2 * sizeof(float), maxHumidity);
+  // Optionally add range checks here
+}
+
 void loop() {
   // Sample every 100ms
   if (millis() - lastSampleTime >= 100) {
@@ -428,7 +449,7 @@ void loop() {
       client.println(
         "<!DOCTYPE html><html lang='en'><head>"
         "<meta charset='UTF-8'>"
-        "<meta http-equiv='refresh' content='10'>"
+        "<meta http-equiv='refresh' content='1'>"
         "<title>404 Not Found</title>"
         "<style>"
         "body { background: linear-gradient(135deg, #232526 0%, #414345 100%); color: #fff; font-family: 'Segoe UI', Arial, sans-serif; min-height: 100vh; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }"
@@ -442,7 +463,7 @@ void loop() {
         "<div class='container'>"
         "<h2>404 Not Found</h2>"
         "<p>The page you requested was not found.</p>"
-        "<div class='refresh'>Page will refresh in 10 seconds.</div>"
+        "<div class='refresh'>Page will refresh in 1 second.</div>"
         "</div></body></html>"
       );
     }
