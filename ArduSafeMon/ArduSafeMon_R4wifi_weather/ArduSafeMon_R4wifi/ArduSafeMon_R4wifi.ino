@@ -422,10 +422,29 @@ void loop() {
       sendRootHtml(client, isSafe);
     } else {
       client.println("HTTP/1.1 404 Not Found");
-      client.println("Content-Type: text/plain");
+      client.println("Content-Type: text/html");
       client.println("Connection: close");
       client.println();
-      client.println("404 Not Found");
+      client.println(
+        "<!DOCTYPE html><html lang='en'><head>"
+        "<meta charset='UTF-8'>"
+        "<meta http-equiv='refresh' content='10'>"
+        "<title>404 Not Found</title>"
+        "<style>"
+        "body { background: linear-gradient(135deg, #232526 0%, #414345 100%); color: #fff; font-family: 'Segoe UI', Arial, sans-serif; min-height: 100vh; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }"
+        ".container { background: rgba(30,34,40,0.95); border-radius: 18px; box-shadow: 0 4px 32px rgba(0,0,0,0.25); padding: 2.5em 3em 2em 3em; text-align: center; min-width: 320px; }"
+        "h2 { color: #ffd600; font-size: 2.2em; margin-bottom: 0.5em; }"
+        "p { color: #fff; font-size: 1.2em; }"
+        ".refresh { color: #bbb; font-size: 1em; margin-top: 2em; }"
+        "@media (max-width: 500px) { .container { min-width: 0; padding: 1.2em 0.5em; } h2 { font-size: 1.3em; } }"
+        "</style>"
+        "</head><body>"
+        "<div class='container'>"
+        "<h2>404 Not Found</h2>"
+        "<p>The page you requested was not found.</p>"
+        "<div class='refresh'>Page will refresh in 10 seconds.</div>"
+        "</div></body></html>"
+      );
     }
     delay(1);
     client.stop();
