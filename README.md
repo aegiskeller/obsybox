@@ -18,3 +18,5 @@ Power is a 10-30VDC to BRN and BLK. Voltage supply from the microprocessor is su
 ## problems with CH430?
 see here: https://forum.arduino.cc/t/a-fatal-esptool-py-error-occurred-cannot-configure-port-something-went-wrong/1225308/7
 This appears to be an issue with a driver update that affects those cheap and cheery clones with a CH430 chip for serial.
+
+look for the driver 3.4.2014.8 dated 08/08/20141
