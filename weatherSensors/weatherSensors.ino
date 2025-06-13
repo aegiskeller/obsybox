@@ -5,7 +5,7 @@
 #include <math.h>
 
 // Pin definitions
-#define DHTPIN 5        // DHT11 data pin connected to NodeMCU D2
+#define DHTPIN D0        // DHT11 data pin connected of wemos mini d1
 #define DHTTYPE DHT11   // DHT 11
 #define LIGHT_SENSOR_PIN A0 // Light sensor connected to analog pin A0
 
@@ -340,6 +340,16 @@ void loop() {
     lastSampleTime = now;
     sampleStartTime = 0;
     sampleCount = 0;
+  }
+
+  // Rapid serial debug output (every 200ms)
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug > 200) {
+    lastDebug = millis();
+    Serial.print("T: "); Serial.print(temperature, 1);
+    Serial.print(" C, H: "); Serial.print(humidity, 1);
+    Serial.print(" %, L: "); Serial.print(lightLevel);
+    Serial.print(", D: "); Serial.println(calculateDewPoint(temperature, humidity), 1);
   }
 }
 
