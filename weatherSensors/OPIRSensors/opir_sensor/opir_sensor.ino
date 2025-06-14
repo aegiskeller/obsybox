@@ -7,6 +7,8 @@
 #include <Adafruit_MLX90614.h>
 
 #include "arduino_secrets.h"
+#include <PubSubClient.h>
+
 
 // have url endpoints for lux, sky temperature, ambient temperature
 // lux == /lux
@@ -16,6 +18,9 @@
 // WiFi credentials
 const char* ssid = SECRET_SSID; 
 const char* password = SECRET_PASS;
+
+// mqtt server
+const char* mqtt_server = SECRET_MQTT_SERVER;
 
 // Sensor objects
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
@@ -275,5 +280,24 @@ void loop() {
     ambTempSum = 0;
     sampleCount = 0;
     lastMinuteTime = now;
+  }
+
+  // MQTT publishing
+  char mqttTopic[] = "opir";
+  char payload[128];
+  snprintf(payload, sizeof(payload),
+           "{\"lux\":%.2f,\"skytemp\":%.2f,\"ambtemp\":%.2f}",
+           luxHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE],
+           objTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE],
+           ambTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE]);
+
+  PubSubClient client;
+  client.setServer(mqtt_server, 1883);
+  if (client.connect("ESP8266Client")) {
+    if (client.publish(mqttTopic, payload)) {
+      Serial.println("Published to MQTT!");
+    } else {
+      Serial.println("Publish failed!");
+    }
   }
 }

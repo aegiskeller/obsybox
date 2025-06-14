@@ -26,3 +26,19 @@ look for the driver 3.4.2014.8 dated 08/08/20141
 192.168.1.100 == ArduSafeMon_R4wifi_weather/ArduSafeMon_R4wifi - Sky Condition Sensors - /lux, /sky, /ambient
 192.168.1.183 == Wombat Weather Station - /temperature, /humidity, /windspeed
 192.168.1.148 == CameraWebServer - ESP32cam; many endpts /capture
+
+## MQTT
+### Setup
+o Go to Mosquitto Downloads and download the Windows installer.
+o Add Mosquitto to PATH:
+    Open System Properties > Advanced > Environment Variables.
+    Under "System variables", find and select Path, then click Edit.
+    Click New and add: C:\Program Files\mosquitto
+o Start the Broker:
+    Open a Command Prompt.
+    Run: mosquitto
+o The broker will start on port 1883
+
+### Test 
+Publish a message: mosquitto_pub -h localhost -t test/topic -m "Hello MQTT"
+Subscribe to a topic: mosquitto_sub -h localhost -t test/topic
