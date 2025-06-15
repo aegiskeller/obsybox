@@ -53,3 +53,6 @@ run mosquitto broker
 
 and external client:
  mosquitto_sub -h 192.168.1.4 -t opir_sensor
+
+### IOTServer
+https://www.youtube.com/redirect?event=video_description&redir_token=QUFFLUhqa0xCVzhmbFpHMEtfVUlPckxDMExzbkF6QjZ1d3xBQ3Jtc0tta3BhSy13NzhkX2d3ZENDRlNsc2Nub0wzai04Vk40Q1g4UmI5TmFxM0pZd2tFa3lsRzY2MXVreUp1Tk1TYjF6YV9SQkIzbFp6bFk5LU85T293dXVqZG5oUnFXTzZTeXBaUkRTTjE0SURvbzJLOGdCdw&q=https%3A%2F%2Flearnembeddedsystems.co.uk%2Feasy-raspberry-pi-iot-server&v=_DO2wHI6JWQ
