@@ -1,33 +1,27 @@
 #include <Wire.h>
-#include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
+#include <WiFiNINA.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_TSL2591.h>
 #include <Adafruit_MLX90614.h>
-
-#include "arduino_secrets.h"
 #include <PubSubClient.h>
 
-
-// have url endpoints for lux, sky temperature, ambient temperature
-// lux == /lux
-/// sky temperature == /sky
-// ambient temperature == /ambient
+#include "arduino_secrets.h"
 
 // WiFi credentials
-const char* ssid = SECRET_SSID; 
+const char* ssid = SECRET_SSID;
 const char* password = SECRET_PASS;
 
-// mqtt server
-const char* mqtt_server = SECRET_MQTT_SERVER;
+// MQTT settings
+const char* mqtt_server = "192.168.1.4"; 
+const int mqtt_port = 1883;
+const char* mqtt_topic = "opir_sensor";
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
 // Sensor objects
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
-
-// Web server
-AsyncWebServer server(80);
 
 // History buffer for 1 hour (60 samples, 1 per minute)
 #define HISTORY_SIZE 60
@@ -43,16 +37,28 @@ void addToHistory(float lux, float objTemp, float ambTemp) {
   historyIndex = (historyIndex + 1) % HISTORY_SIZE;
 }
 
+WiFiServer server(80);
+
+void reconnectMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    if (mqttClient.connect("OPIR_MKRWiFi")) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  Wire.begin(D2, D1); // SDA, SCL for Wemos D1 mini
+  delay(1000);
+  Serial.println("TSL2591 & MLX90614 Test Harness (MKR WiFi)");
 
-  // Set static IP
-  IPAddress local_IP(192, 168, 1, 100);
-  IPAddress gateway(192, 168, 1, 1);
-  IPAddress subnet(255, 255, 255, 0);
-  IPAddress dns(8, 8, 8, 8);
-  WiFi.config(local_IP, gateway, subnet, dns);
+  Wire.begin(); // Default SDA/SCL for MKR boards
 
   // WiFi connection
   WiFi.begin(ssid, password);
@@ -63,6 +69,9 @@ void setup() {
   }
   Serial.println("\nWiFi connected. IP address: ");
   Serial.println(WiFi.localIP());
+
+  // MQTT setup
+  mqttClient.setServer(mqtt_server, mqtt_port);
 
   // Sensor init
   if (!tsl.begin()) {
@@ -83,9 +92,78 @@ void setup() {
     ambTempHistory[i] = NAN;
   }
 
-  // Web server routes
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    String html = R"rawliteral(
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void serveClient(WiFiClient& client) {
+  String req = client.readStringUntil('\r');
+  client.flush();
+
+  // Read sensor values
+  uint32_t lum = tsl.getFullLuminosity();
+  uint16_t ir = lum >> 16;
+  uint16_t full = lum & 0xFFFF;
+  float lux = tsl.calculateLux(full, ir);
+  float objTemp = mlx.readObjectTempC();
+  float ambTemp = mlx.readAmbientTempC();
+
+  // Endpoints
+  if (req.indexOf("GET /lux") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(lux, 2);
+  } else if (req.indexOf("GET /sky") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(objTemp, 2);
+  } else if (req.indexOf("GET /ambient") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(ambTemp, 2);
+  } else if (req.indexOf("GET /data") >= 0) {
+    // Prepare JSON with history and current values
+    String json = "{";
+    json += "\"lux_now\":" + String(luxHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE], 2) + ",";
+    json += "\"obj_now\":" + String(objTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE], 2) + ",";
+    json += "\"amb_now\":" + String(ambTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE], 2) + ",";
+    json += "\"lux\":[";
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+      int idx = (historyIndex + i) % HISTORY_SIZE;
+      json += isnan(luxHistory[idx]) ? "null" : String(luxHistory[idx], 2);
+      if (i < HISTORY_SIZE - 1) json += ",";
+    }
+    json += "],\"obj\":[";
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+      int idx = (historyIndex + i) % HISTORY_SIZE;
+      json += isnan(objTempHistory[idx]) ? "null" : String(objTempHistory[idx], 2);
+      if (i < HISTORY_SIZE - 1) json += ",";
+    }
+    json += "],\"amb\":[";
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+      int idx = (historyIndex + i) % HISTORY_SIZE;
+      json += isnan(ambTempHistory[idx]) ? "null" : String(ambTempHistory[idx], 2);
+      if (i < HISTORY_SIZE - 1) json += ",";
+    }
+    json += "]}";
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.println();
+    client.println(json);
+  } else {
+    // Serve main HTML page
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println("Connection: close");
+    client.println();
+    client.println(R"rawliteral(
       <!DOCTYPE html>
       <html>
       <head>
@@ -169,62 +247,10 @@ void setup() {
         </script>
       </body>
       </html>
-    )rawliteral";
-    request->send(200, "text/html", html);
-  });
-
-  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){
-    // Prepare JSON with history and current values
-    String json = "{";
-    json += "\"lux_now\":" + String(luxHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE], 2) + ",";
-    json += "\"obj_now\":" + String(objTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE], 2) + ",";
-    json += "\"amb_now\":" + String(ambTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE], 2) + ",";
-    json += "\"lux\":[";
-    for (int i = 0; i < HISTORY_SIZE; i++) {
-      int idx = (historyIndex + i) % HISTORY_SIZE;
-      json += isnan(luxHistory[idx]) ? "null" : String(luxHistory[idx], 2);
-      if (i < HISTORY_SIZE - 1) json += ",";
-    }
-    json += "],\"obj\":[";
-    for (int i = 0; i < HISTORY_SIZE; i++) {
-      int idx = (historyIndex + i) % HISTORY_SIZE;
-      json += isnan(objTempHistory[idx]) ? "null" : String(objTempHistory[idx], 2);
-      if (i < HISTORY_SIZE - 1) json += ",";
-    }
-    json += "],\"amb\":[";
-    for (int i = 0; i < HISTORY_SIZE; i++) {
-      int idx = (historyIndex + i) % HISTORY_SIZE;
-      json += isnan(ambTempHistory[idx]) ? "null" : String(ambTempHistory[idx], 2);
-      if (i < HISTORY_SIZE - 1) json += ",";
-    }
-    json += "]}";
-    request->send(200, "application/json", json);
-  });
-
-  server.on("/lux", HTTP_GET, [](AsyncWebServerRequest *request){
-    float lux = 0;
-    uint32_t lum = tsl.getFullLuminosity();
-    uint16_t ir = lum >> 16;
-    uint16_t full = lum & 0xFFFF;
-    lux = tsl.calculateLux(full, ir);
-    request->send(200, "text/plain", String(lux, 2));
-  });
-
-  server.on("/sky", HTTP_GET, [](AsyncWebServerRequest *request){
-    float skyTemp = mlx.readObjectTempC();
-    request->send(200, "text/plain", String(skyTemp, 2));
-  });
-
-  server.on("/ambient", HTTP_GET, [](AsyncWebServerRequest *request){
-    float ambTemp = mlx.readAmbientTempC();
-    request->send(200, "text/plain", String(ambTemp, 2));
-  });
-
-  server.begin();
-  Serial.println("HTTP server started");
+    )rawliteral");
+  }
 }
 
-// For averaging
 #define SAMPLES_PER_MINUTE 10
 float luxSum = 0;
 float objTempSum = 0;
@@ -232,8 +258,22 @@ float ambTempSum = 0;
 int sampleCount = 0;
 unsigned long lastSampleTime = 0;
 unsigned long lastMinuteTime = 0;
+unsigned long lastMqttPublish = 0;
 
 void loop() {
+  // Handle HTTP requests
+  WiFiClient client = server.available();
+  if (client) {
+    serveClient(client);
+    delay(1);
+    client.stop();
+  }
+
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
+  }
+  mqttClient.loop();
+
   unsigned long now = millis();
 
   // Take a sample every 6 seconds (60000 ms / 10)
@@ -274,30 +314,17 @@ void loop() {
     Serial.print(" | Sky Temp: "); Serial.print(avgObjTemp, 2);
     Serial.print(" C | Ambient Temp: "); Serial.print(avgAmbTemp, 2); Serial.println(" C");
 
+    // Publish to MQTT
+    char payload[128];
+    snprintf(payload, sizeof(payload),
+      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f}", avgLux, avgObjTemp, avgAmbTemp);
+    mqttClient.publish(mqtt_topic, payload);
+
     // Reset for next minute
     luxSum = 0;
     objTempSum = 0;
     ambTempSum = 0;
     sampleCount = 0;
     lastMinuteTime = now;
-  }
-
-  // MQTT publishing
-  char mqttTopic[] = "opir";
-  char payload[128];
-  snprintf(payload, sizeof(payload),
-           "{\"lux\":%.2f,\"skytemp\":%.2f,\"ambtemp\":%.2f}",
-           luxHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE],
-           objTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE],
-           ambTempHistory[(historyIndex + HISTORY_SIZE - 1) % HISTORY_SIZE]);
-
-  PubSubClient client;
-  client.setServer(mqtt_server, 1883);
-  if (client.connect("ESP8266Client")) {
-    if (client.publish(mqttTopic, payload)) {
-      Serial.println("Published to MQTT!");
-    } else {
-      Serial.println("Publish failed!");
-    }
   }
 }

@@ -42,3 +42,14 @@ o The broker will start on port 1883
 ### Test 
 Publish a message: mosquitto_pub -h localhost -t test/topic -m "Hello MQTT"
 Subscribe to a topic: mosquitto_sub -h localhost -t test/topic
+
+### Configure for local network
+edit C:\Program Files\mosquitto\mosquitto.conf
+> password_file C:\Program Files\mosquitto\mqtt_pass.txt
+> listener 1883 0.0.0.0
+
+run mosquitto broker
+>mosquitto -c "C:\Program Files\mosquitto\mosquitto.conf" -v 
+
+and external client:
+ mosquitto_sub -h 192.168.1.4 -t opir_sensor
