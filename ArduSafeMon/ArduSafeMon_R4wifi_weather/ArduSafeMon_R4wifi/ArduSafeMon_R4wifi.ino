@@ -425,14 +425,19 @@ void loop() {
   }
 
   // --- Publish safety status to MQTT ---
-  static bool lastPublishedSafe = true;
+  static int lastPublishedSafe = -1;
   static String lastPublishedReason = "";
   static unsigned long lastPublishTime = 0;
+  // Always publish at least every 60 seconds, or on change
   if (isSafe != lastPublishedSafe || reason != lastPublishedReason || millis() - lastPublishTime > 60000) {
     String payload = "{\"safe\":";
     payload += isSafe ? "true" : "false";
     payload += ",\"reason\":\"" + reason + "\"}";
-    mqttClient.publish("obsybox/weathersafety", payload);
+    bool pubResult = mqttClient.publish("obsybox/weathersafety", payload);
+    Serial.print("Publishing to obsybox/weathersafety: ");
+    Serial.println(payload);
+    Serial.print("Publish result: ");
+    Serial.println(pubResult ? "OK" : "FAILED");
     lastPublishedSafe = isSafe;
     lastPublishedReason = reason;
     lastPublishTime = millis();
