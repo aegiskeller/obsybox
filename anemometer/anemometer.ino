@@ -2,6 +2,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <FS.h> // Include the SPIFFS library
+#include <PubSubClient.h> 
 
 // --- Add min/max values for plotting ---
 float tmin = 0, tmax = 40;      // Temperature range (°C)
@@ -15,6 +16,14 @@ float amin = 0, amax = 1023;    // Anemometer ADC range
 #include "arduino_secrets.h"
 const char* ssid = SECRET_SSID;
 const char* password = SECRET_PASS;
+
+// MQTT settings
+const char* mqtt_server = "192.168.1.49";
+const int mqtt_port = 1883;
+const char* mqtt_topic = "obsybox/anemometer";
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
 // Static IP configuration
 IPAddress staticIP(192, 168, 1, 183);
@@ -36,6 +45,20 @@ unsigned long lastSampleTime = 0;
 float lastAvgTemperature = NAN;
 float lastAvgHumidity = NAN;
 float lastAvgAnemometer = NAN;
+
+void reconnectMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    if (mqttClient.connect("Anemometer_ESP8266")) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
 
 void handleRoot() {
   float temperature = tempHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
@@ -180,7 +203,7 @@ void setup() {
   for (int i = 0; i < HISTORY_SIZE; i++) {
     tempHistory[i] = NAN;
     humHistory[i] = NAN;
-    anemometerHistory[i] = NAN; // <-- Add this line
+    anemometerHistory[i] = NAN;
   }
 
   WiFi.mode(WIFI_STA);
@@ -195,6 +218,7 @@ void setup() {
   Serial.println("\nWiFi connected. IP address: ");
   Serial.println(WiFi.localIP());
 
+  mqttClient.setServer(mqtt_server, mqtt_port); 
   server.on("/", handleRoot);
   server.on("/temperature", handleTemperature);
   server.on("/humidity", handleHumidity);
@@ -207,6 +231,11 @@ void setup() {
 void loop() {
   server.handleClient();
 
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
+  }
+  mqttClient.loop();
+
   static unsigned long lastSampleTime = 0;
   static unsigned long sampleStartTime = 0;
   static int sampleCount = 0;
@@ -216,6 +245,7 @@ void loop() {
   static int validSamples = 0;
   static const int NUM_SAMPLES = 100;
   static unsigned long lastSampleInterval = 0;
+  static unsigned long lastMqttPublish = 0;
 
   unsigned long now = millis();
 
@@ -267,6 +297,13 @@ void loop() {
     Serial.print(avgHumidity);
     Serial.print(" %, Anemometer ADC: ");
     Serial.println(avgAnemometer);
+
+    // --- MQTT publish every minute (after averaging) ---
+    char payload[128];
+    snprintf(payload, sizeof(payload),
+      "{\"t\":%.2f,\"h\":%.2f,\"ws\":%.2f}",
+      avgTemperature, avgHumidity, avgAnemometer);
+    mqttClient.publish(mqtt_topic, payload);
 
     lastSampleTime = now;
     sampleStartTime = 0;
