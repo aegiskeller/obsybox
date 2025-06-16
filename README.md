@@ -55,4 +55,25 @@ and external client:
  mosquitto_sub -h 192.168.1.4 -t opir_sensor
 
 ### IOTServer
-https://www.youtube.com/redirect?event=video_description&redir_token=QUFFLUhqa0xCVzhmbFpHMEtfVUlPckxDMExzbkF6QjZ1d3xBQ3Jtc0tta3BhSy13NzhkX2d3ZENDRlNsc2Nub0wzai04Vk40Q1g4UmI5TmFxM0pZd2tFa3lsRzY2MXVreUp1Tk1TYjF6YV9SQkIzbFp6bFk5LU85T293dXVqZG5oUnFXTzZTeXBaUkRTTjE0SURvbzJLOGdCdw&q=https%3A%2F%2Flearnembeddedsystems.co.uk%2Feasy-raspberry-pi-iot-server&v=_DO2wHI6JWQ
+Work through the following setup:
+https://youtu.be/_DO2wHI6JWQ?si=jBXVhuQ4y__hzBQL
+
+This installs IOTstack:
+cd IOTStack
+./menu.sh
+
+To see the five containers running:
+
+~/IOTstack $ docker-compose ps
+
+NAME           IMAGE                    COMMAND                  SERVICE        CREATED        STATUS                  PORTS
+
+grafana        grafana/grafana          "/run.sh"                grafana        19 hours ago   Up 19 hours (healthy)   0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+
+influxdb       influxdb:1.8             "/entrypoint.sh inflâ¦"   influxdb       19 hours ago   Up 19 hours (healthy)   0.0.0.0:8086->8086/tcp, [::]:8086->8086/tcp
+
+mosquitto      iotstack-mosquitto       "/docker-entrypoint.â¦"   mosquitto      19 hours ago   Up 19 hours (healthy)   0.0.0.0:1883->1883/tcp, [::]:1883->1883/tcp
+
+nodered        iotstack-nodered         "./entrypoint.sh"        nodered        19 hours ago   Up 19 hours (healthy)   0.0.0.0:1880->1880/tcp, [::]:1880->1880/tcp
+
+portainer-ce   portainer/portainer-ce   "/portainer"             portainer-ce   19 hours ago   Up 19 hours             0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp, 0.0.0.0:9443->9443/tcp, [::]:9443->9443/tcp
