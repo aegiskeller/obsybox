@@ -377,6 +377,7 @@ void loop() {
 
   // Parse weather values for safety check
   float cloudsVal = -1, windVal = -1, humidityVal = -1;
+  String reason = "";
   if (lastWeatherJson.length() > 0) {
     int hIdx = lastWeatherJson.indexOf("\"humidity\":");
     if (hIdx > 0) {
@@ -402,10 +403,39 @@ void loop() {
 
   // Safety logic: not safe if any weather value exceeds user limits
   bool isSafe = averagedValue < safeState;
-  if ((cloudsVal >= 0 && cloudsVal > maxClouds) ||
-      (windVal >= 0 && windVal > maxWind) ||
-      (humidityVal >= 0 && humidityVal > maxHumidity)) {
+  reason = "";
+  if (averagedValue >= safeState) {
+    reason = "Rain sensor unsafe (" + String(averagedValue, 1) + " >= " + String(safeState, 1) + ")";
     isSafe = false;
+  }
+  if ((cloudsVal >= 0 && cloudsVal > maxClouds)) {
+    reason = "Clouds too high (" + String(cloudsVal, 1) + " > " + String(maxClouds, 1) + ")";
+    isSafe = false;
+  }
+  if ((windVal >= 0 && windVal > maxWind)) {
+    reason = "Wind too high (" + String(windVal, 1) + " > " + String(maxWind, 1) + ")";
+    isSafe = false;
+  }
+  if ((humidityVal >= 0 && humidityVal > maxHumidity)) {
+    reason = "Humidity too high (" + String(humidityVal, 1) + " > " + String(maxHumidity, 1) + ")";
+    isSafe = false;
+  }
+  if (isSafe) {
+    reason = "All conditions safe";
+  }
+
+  // --- Publish safety status to MQTT ---
+  static bool lastPublishedSafe = true;
+  static String lastPublishedReason = "";
+  static unsigned long lastPublishTime = 0;
+  if (isSafe != lastPublishedSafe || reason != lastPublishedReason || millis() - lastPublishTime > 60000) {
+    String payload = "{\"safe\":";
+    payload += isSafe ? "true" : "false";
+    payload += ",\"reason\":\"" + reason + "\"}";
+    mqttClient.publish("obsybox/weathersafety", payload);
+    lastPublishedSafe = isSafe;
+    lastPublishedReason = reason;
+    lastPublishTime = millis();
   }
 
   WiFiClient client = server.available();
