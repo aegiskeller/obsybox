@@ -1,15 +1,14 @@
 // modify code for deployment on Arduino Uno R4 with WiFi
 #include <WiFiS3.h>
-#include "arduino_secrets.h"
+#include "arduino_secrets.h" // Make sure this defines ssid and pass
 #include <WiFiClient.h>
 #include <EEPROM.h>
-#include <MQTT.h> // Add ArduinoMqttClient library
 
-char ssid[] = SECRET_SSID;
-char pass[] = SECRET_PASS;
+char ssid[] = SECRET_SSID;        // your network SSID (name)
+char pass[] = SECRET_PASS;        // your network password
 
 float rainSensorValue = 0.0;
-float safeState = 512;
+float safeState = 512; // set desired safeState of the monitor
 
 WiFiServer server(80);
 
@@ -23,24 +22,10 @@ String lastWeatherJson = "";
 unsigned long lastWeatherFetch = 0;
 const unsigned long weatherFetchInterval = 60000 ; // 10 minutes in ms
 
-// MQTT settings
-const char* mqtt_broker = "192.168.1.49"; // Set your broker IP
-const int mqtt_port = 1883;
-const char* mqtt_topic = "obsybox/weather";
-WiFiClient net;
-MQTTClient mqttClient(1024); // Buffer size for large JSON
-
 // --- Add these global variables at the top ---
 float maxClouds = 100;
 float maxWind = 100;
 float maxHumidity = 100;
-
-// --- MQTT message handler ---
-void weatherMessageHandler(String &topic, String &payload) {
-  lastWeatherJson = payload;
-  Serial.println("Weather updated from MQTT:");
-  Serial.println(lastWeatherJson);
-}
 
 void setup() {
   pinMode(A0, INPUT_PULLUP);
@@ -49,10 +34,10 @@ void setup() {
   Serial.print("notsafe#");
 
   // Set static IP configuration
-  IPAddress local_IP(192, 168, 1, 99);
-  IPAddress gateway(192, 168, 1, 1);
-  IPAddress subnet(255, 255, 255, 0);
-  IPAddress dns(8, 8, 8, 8);
+  IPAddress local_IP(192, 168, 1, 99);     // Set your desired static IP
+  IPAddress gateway(192, 168, 1, 1);        // Set your network gateway
+  IPAddress subnet(255, 255, 255, 0);       // Set your subnet mask
+  IPAddress dns(8, 8, 8, 8);                // Optional: set DNS
 
   WiFi.config(local_IP, gateway, subnet, dns);
 
@@ -70,20 +55,8 @@ void setup() {
   // Initialize samples array
   for (int i = 0; i < NUM_SAMPLES; i++) samples[i] = 0;
 
+  //EEPROM.begin(64); // Initialize EEPROM (size in bytes)
   loadWeatherParamsFromEEPROM();
-
-  // --- MQTT setup ---
-  mqttClient.begin(mqtt_broker, mqtt_port, net);
-  mqttClient.onMessage(weatherMessageHandler);
-
-  Serial.print("Connecting to MQTT broker...");
-  while (!mqttClient.connect("ArduSafeMon_R4wifi")) {
-    Serial.print(".");
-    delay(1000);
-  }
-  Serial.println("connected!");
-
-  mqttClient.subscribe(mqtt_topic);
 }
 
 // --- Add this function to parse user input from the web form ---
@@ -342,6 +315,37 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
   client.println(html);
 }
 
+String getWeatherFromFlask() {
+  const char* host = "192.168.1.3"; // Flask server IP
+  const int port = 8080;
+  const char* url = "/weather";
+  WiFiClient client;
+  String payload = "";
+
+  if (client.connect(host, port)) {
+    client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                 "Host: " + host + "\r\n" +
+                 "Connection: close\r\n\r\n");
+
+    // Wait for response
+    unsigned long timeout = millis();
+    while (client.connected() && millis() - timeout < 3000) {
+      while (client.available()) {
+        String line = client.readStringUntil('\n');
+        // Skip HTTP headers
+        if (line == "\r") break;
+      }
+      // Now read the body
+      while (client.available()) {
+        payload += (char)client.read();
+      }
+    }
+    client.stop();
+  } else {
+    Serial.println("Connection to Flask server failed.");
+  }
+  return payload;
+}
 
 void saveWeatherParamsToEEPROM() {
   EEPROM.put(0, maxClouds);
@@ -358,9 +362,6 @@ void loadWeatherParamsFromEEPROM() {
 }
 
 void loop() {
-  // MQTT loop
-  mqttClient.loop();
-
   // Sample every 100ms
   if (millis() - lastSampleTime >= 100) {
     lastSampleTime = millis();
@@ -373,7 +374,16 @@ void loop() {
     averagedValue = sum / (float)NUM_SAMPLES;
   }
 
-  // Weather data is now updated in lastWeatherJson by MQTT callback
+  // Fetch weather every 10 minutes
+  if (millis() - lastWeatherFetch > weatherFetchInterval || lastWeatherFetch == 0) {
+    String weather = getWeatherFromFlask();
+    if (weather.length() > 0) {
+      lastWeatherJson = weather;
+      Serial.println("Weather updated:");
+      Serial.println(lastWeatherJson);
+    }
+    lastWeatherFetch = millis();
+  }
 
   // Parse weather values for safety check
   float cloudsVal = -1, windVal = -1, humidityVal = -1;

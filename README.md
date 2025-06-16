@@ -15,6 +15,16 @@ Wiring diagram for the ZTS-3000-YUX-R01 rain sensor:
 
 Power is a 10-30VDC to BRN and BLK. Voltage supply from the microprocessor is supplied to WHT and relay sense is read from GRN.
 
+### set up ArduSafeMon weather details
+in Windows task scheduler, create task GetWeatherMQTT.
+
+Program/script: C:\Users\aegis\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+
+Arguments: "C:\Users\aegis\Documents\obsybox\ArduSafeMon\ArduSafeMon_R4wifi_weather\getweather_mqtt.py"
+
+Start in: C:\Users\aegis\Documents\obsybox\ArduSafeMon\ArduSafeMon_R4wifi_weather
+
+
 ## problems with CH430?
 see here: https://forum.arduino.cc/t/a-fatal-esptool-py-error-occurred-cannot-configure-port-something-went-wrong/1225308/7
 This appears to be an issue with a driver update that affects those cheap and cheery clones with a CH430 chip for serial.
