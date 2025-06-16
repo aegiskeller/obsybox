@@ -63,7 +63,9 @@ cd IOTStack
 ./menu.sh
 
 To see the five containers running:
+
 ~/IOTstack $ docker-compose ps
+
 NAME           IMAGE                    COMMAND                  SERVICE        CREATED        STATUS                  PORTS
 grafana        grafana/grafana          "/run.sh"                grafana        19 hours ago   Up 19 hours (healthy)   0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
 influxdb       influxdb:1.8             "/entrypoint.sh inflâ¦"   influxdb       19 hours ago   Up 19 hours (healthy)   0.0.0.0:8086->8086/tcp, [::]:8086->8086/tcp
