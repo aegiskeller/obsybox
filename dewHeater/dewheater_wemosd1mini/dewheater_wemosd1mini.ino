@@ -7,6 +7,7 @@
 #include <Hash.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <PubSubClient.h> 
 #include "arduino_secrets.h"
 
 // Replace with your network credentials
@@ -330,6 +331,9 @@ void ServerNotFound(AsyncWebServerRequest *request) {
   request->send(404, "text/plain", "Not found");
 }
 
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
 void setup() {
   Serial.begin(9600); /* begin serial for debug */
   Wire.begin(); /* join i2c bus with std settings */
@@ -345,7 +349,10 @@ void setup() {
 
   // Print ESP8266 Local IP Address
   Serial.println(WiFi.localIP());
-  
+
+  // --- MQTT setup ---
+  mqttClient.setServer("192.168.1.49", 1883); // Set your broker IP and port
+
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html, processor);
@@ -414,6 +421,22 @@ void setup() {
 }
 
 void loop() {
+  // --- MQTT reconnect logic ---
+  if (!mqttClient.connected()) {
+    while (!mqttClient.connected()) {
+      Serial.print("Attempting MQTT connection...");
+      if (mqttClient.connect("dewheater_wemosd1mini")) {
+        Serial.println("connected");
+      } else {
+        Serial.print("failed, rc=");
+        Serial.print(mqttClient.state());
+        Serial.println(" try again in 5 seconds");
+        delay(5000);
+      }
+    }
+  }
+  mqttClient.loop();
+
   Wire.beginTransmission(0x08); /* begin with device address 8 */
   /* Construct the Master message */
   /* part one is the delta t requested */
@@ -434,7 +457,6 @@ void loop() {
     i=i+1;
     yield();
   }
-//  Serial.println(datastr);
   // parse this string
   String ambtemp = getValue(datastr, ';', 0);
   String ambhum = getValue(datastr, ';', 1);
@@ -455,7 +477,18 @@ void loop() {
   dp = strtod(dewpt.c_str(), &end);
   hh = strtod(heater.c_str(), &end);
   dt = strtod(deltat.c_str(), &end);
-  delay(5000);
+
+  // --- MQTT publish sensor values ---
+  String payload = "{";
+  payload += "\"ambtemp\":" + String(at, 2) + ",";
+  payload += "\"ambhum\":" + String(ah, 2) + ",";
+  payload += "\"teltemp\":" + String(tt, 2) + ",";
+  payload += "\"dewpt\":" + String(dp, 2) + ",";
+  payload += "\"heaterpower\":" + String(hh, 2) + ",";
+  payload += "\"deltat\":" + String(dt, 2) + ",";
+  payload += "\"mode\":\"" + String(hm) + "\"";
+  payload += "}";
+  mqttClient.publish("obsybox/dewheater", payload.c_str());
 }
 
 
