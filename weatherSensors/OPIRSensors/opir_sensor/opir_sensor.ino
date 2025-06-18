@@ -16,6 +16,7 @@ const char* password = SECRET_PASS;
 const char* mqtt_server = "192.168.1.49";
 const int mqtt_port = 1883;
 const char* mqtt_topic = "obsybox/opir_sensor";
+const char* mqtt_ping_topic = "obsybox/instrumentation/opirping"; 
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -65,6 +66,14 @@ void setup() {
   Serial.println("TSL2591, MLX90614 & AHT10 (MKR WiFi)");
 
   Wire.begin(); // Default SDA/SCL for MKR boards
+
+  // --- Static IP configuration ---
+  IPAddress local_IP(192, 168, 1, 101);
+  IPAddress gateway(192, 168, 1, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  IPAddress dns(8, 8, 8, 8);
+  // WiFiNINA's WiFi.config returns void, not bool, so just call it:
+  WiFi.config(local_IP, dns, gateway, subnet);
 
   // WiFi connection
   WiFi.begin(ssid, password);
@@ -372,6 +381,15 @@ void loop() {
     sampleCount++;
 
     lastSampleTime = now;
+  }
+
+  // --- MQTT Ping Topic ---
+  static unsigned long lastPing = 0;
+  if (now - lastPing > 10000 || lastPing == 0) { // every 10 seconds
+    char pingPayload[64];
+    snprintf(pingPayload, sizeof(pingPayload), "{\"ip\":\"%s\",\"uptime\":%lu}", WiFi.localIP().toString().c_str(), millis() / 1000);
+    mqttClient.publish(mqtt_ping_topic, pingPayload);
+    lastPing = now;
   }
 
   // Publish to MQTT (merged feed)
