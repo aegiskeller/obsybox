@@ -9,6 +9,7 @@
 #include <ESPAsyncWebServer.h>
 #include <PubSubClient.h> 
 #include "arduino_secrets.h"
+#include <ArduinoJson.h> // Add this for JSON parsing
 
 // Replace with your network credentials
 char ssid[] = SECRET_SSID;        // your network SSID (name)
@@ -266,20 +267,20 @@ const char index_html[] PROGMEM = R"rawliteral(
 // Replaces placeholder with DHT values
 String processor(const String& var){
   //Serial.println(var);
-  if(var == "AMBTEMP"){
-    return String(at);
+  if(var == "AMBTEMP"){ // <-- FIX: Remove % signs, match just the variable name
+    return String(at, 2); // Show with 2 decimal places
   }
   else if(var == "AMBHUM"){
-    return String(ah);
+    return String(ah, 2);
   }
   else if(var == "TELTEMP"){
-    return String(tt);
+    return String(tt, 2);
   }
   else if(var == "DEWPT"){
-    return String(dp);
+    return String(dp, 2);
   }
   else if(var == "HTRPWR"){
-    return String(hh);
+    return String(hh, 2);
   }
   else if(var == "OUTPUTMODESTATE"){
     if (hm == "A"){
@@ -293,19 +294,19 @@ String processor(const String& var){
     }
   }
   else if(var == "DELTAT"){
-    return String(dt);
+    return String(dt, 2);
   }
   else if(var == "SLIDERVALUE"){
     return sliderValue;
   }
   else if(var == "BUTTONPLACEHOLDER"){
-  String buttons = "";
-  buttons += "<div style=\"margin-top:1em;\">";
-  buttons += "<label><input type=\"radio\" name=\"hm_mode\" value=\"A\" id=\"hmA\" onclick=\"setHmMode('A')\"> Above Ambient</label>";
-  buttons += "<label style=\"margin-left:2em;\"><input type=\"radio\" name=\"hm_mode\" value=\"D\" id=\"hmD\" onclick=\"setHmMode('D')\"> Above Dewpoint</label>";
-  buttons += "</div>";
-  return buttons;
-}
+    String buttons = "";
+    buttons += "<div style=\"margin-top:1em;\">";
+    buttons += "<label><input type=\"radio\" name=\"hm_mode\" value=\"A\" id=\"hmA\" onclick=\"setHmMode('A')\"> Above Ambient</label>";
+    buttons += "<label style=\"margin-left:2em;\"><input type=\"radio\" name=\"hm_mode\" value=\"D\" id=\"hmD\" onclick=\"setHmMode('D')\"> Above Dewpoint</label>";
+    buttons += "</div>";
+    return buttons;
+  }
   return String();
 }
 
@@ -334,6 +335,23 @@ void ServerNotFound(AsyncWebServerRequest *request) {
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+// Buffer for MQTT message
+String lastOpirSensorJson = "";
+unsigned long lastOpirSensorUpdate = 0;
+unsigned long lastMqttPublish = 0;
+unsigned long lastSlaveMessage = 0;
+
+// MQTT callback to handle opir_sensor topic
+void opirSensorCallback(char* topic, byte* payload, unsigned int length) {
+  if (String(topic) == "obsybox/opir_sensor") {
+    payload[length] = '\0'; // Null-terminate
+    lastOpirSensorJson = String((char*)payload);
+    lastOpirSensorUpdate = millis();
+    Serial.print("Received opir_sensor MQTT: ");
+    Serial.println(lastOpirSensorJson);
+  }
+}
+
 void setup() {
   Serial.begin(9600); /* begin serial for debug */
   Wire.begin(); /* join i2c bus with std settings */
@@ -352,11 +370,58 @@ void setup() {
 
   // --- MQTT setup ---
   mqttClient.setServer("192.168.1.49", 1883); // Set your broker IP and port
+  mqttClient.setCallback([](char* topic, byte* payload, unsigned int length) {
+    opirSensorCallback(topic, payload, length);
+  });
 
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html, processor);
+    String html = String(index_html);
+
+    // Replace all placeholders with current values using processor()
+    html.replace("%AMBTEMP%", processor("AMBTEMP"));
+    html.replace("%AMBHUM%", processor("AMBHUM"));
+    html.replace("%TELTEMP%", processor("TELTEMP"));
+    html.replace("%DEWPT%", processor("DEWPT"));
+    html.replace("%HTRPWR%", processor("HTRPWR"));
+    html.replace("%OUTPUTMODESTATE%", processor("OUTPUTMODESTATE"));
+    html.replace("%DELTAT%", processor("DELTAT"));
+    html.replace("%SLIDERVALUE%", processor("SLIDERVALUE"));
+    html.replace("%BUTTONPLACEHOLDER%", processor("BUTTONPLACEHOLDER"));
+
+    // Add a button to fetch OPIR sensor MQTT data
+    html.replace("</body>", R"rawliteral(
+      <div style="text-align:center;margin:2em;">
+        <button onclick="fetchOpirSensor()">Fetch OPIR Sensor Data</button>
+        <div id="opirSensorData" style="margin-top:1em;color:#1abc9c;"></div>
+      </div>
+      <script>
+        function fetchOpirSensor() {
+          fetch('/opir_sensor').then(r=>r.json()).then(data=>{
+            let txt = "OPIR Sensor: ";
+            if(data && data.ambtemp!==undefined && data.ambhum!==undefined) {
+              txt += "Ambient Temp: " + data.ambtemp + " °C, Humidity: " + data.ambhum + " %";
+            } else {
+              txt += "No data";
+            }
+            document.getElementById("opirSensorData").innerHTML = txt;
+          });
+        }
+      </script>
+    </body>)rawliteral");
+
+    request->send(200, "text/html", html);
   });
+
+  // Endpoint to serve last OPIR sensor MQTT data as JSON
+  server.on("/opir_sensor", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (lastOpirSensorJson.length() > 0) {
+      request->send(200, "application/json", lastOpirSensorJson);
+    } else {
+      request->send(200, "application/json", "{\"ambtemp\":null,\"ambhum\":null}");
+    }
+  });
+
   server.on("/ambtemp", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/plain", String(at).c_str());
   });
@@ -417,7 +482,6 @@ void setup() {
 
   // Start server
   server.begin();
-
 }
 
 void loop() {
@@ -427,6 +491,7 @@ void loop() {
       Serial.print("Attempting MQTT connection...");
       if (mqttClient.connect("dewheater_wemosd1mini")) {
         Serial.println("connected");
+        mqttClient.subscribe("obsybox/opir_sensor"); // Subscribe to OPIR sensor topic
       } else {
         Serial.print("failed, rc=");
         Serial.print(mqttClient.state());
@@ -437,58 +502,95 @@ void loop() {
   }
   mqttClient.loop();
 
-  Wire.beginTransmission(0x08); /* begin with device address 8 */
-  /* Construct the Master message */
-  /* part one is the delta t requested */
-  dtostrf(sdt,3,1,strsdt);
-  /* part two is the operational mode */
-  strcpy(dataPacket, strsdt);
-  strcat(dataPacket, ";");
-  strcat(dataPacket, hm);
-  Wire.write(dataPacket);  /* sends a short cmd */
-  Wire.endTransmission();    /* stop transmitting */
-  Serial.print("Sent data to the slave: ");
-  Serial.println(dataPacket);
-  Wire.requestFrom(0x08, 28);         // request the payload from the slave
-  //gathers data comming from slave
-  int i=0; //counter for each byte as it arrives
-  while (Wire.available()) { 
-    datastr[i] = Wire.read(); // every character that arrives it put in order in the empty array datastr
-    i=i+1;
-    yield();
-  }
-  // parse this string
-  String ambtemp = getValue(datastr, ';', 0);
-  String ambhum = getValue(datastr, ';', 1);
-  String teletemp = getValue(datastr, ';', 2);
-  String deltat = getValue(datastr, ';', 3);
-  String heater = getValue(datastr, ';', 4);
-  String dewpt = getValue(datastr, ';', 5);
-  char * end;
-  Serial.println(ambtemp);
-  Serial.println(ambhum);
-  Serial.println(teletemp);
-  Serial.println(deltat);
-  Serial.println(heater);
-  Serial.println(dewpt);
-  at = strtod(ambtemp.c_str(), &end);
-  ah = strtod(ambhum.c_str(), &end);
-  tt = strtod(teletemp.c_str(), &end);
-  dp = strtod(dewpt.c_str(), &end);
-  hh = strtod(heater.c_str(), &end);
-  dt = strtod(deltat.c_str(), &end);
+  unsigned long now = millis(); // Only declare once
 
-  // --- MQTT publish sensor values ---
-  String payload = "{";
-  payload += "\"ambtemp\":" + String(at, 2) + ",";
-  payload += "\"ambhum\":" + String(ah, 2) + ",";
-  payload += "\"teltemp\":" + String(tt, 2) + ",";
-  payload += "\"dewpt\":" + String(dp, 2) + ",";
-  payload += "\"heaterpower\":" + String(hh, 2) + ",";
-  payload += "\"deltat\":" + String(dt, 2) + ",";
-  payload += "\"mode\":\"" + String(hm) + "\"";
-  payload += "}";
-  mqttClient.publish("obsybox/dewheater", payload.c_str());
+  // Only send messages to the slave every 10 seconds
+  if (now - lastSlaveMessage >= 10000 || lastSlaveMessage == 0) {
+    Wire.beginTransmission(0x08); /* begin with device address 8 */
+    /* Construct the Master message */
+    /* part one is the delta t requested */
+    dtostrf(sdt,3,1,strsdt);
+    /* part two is the operational mode */
+    strcpy(dataPacket, strsdt);
+    strcat(dataPacket, ";");
+    strcat(dataPacket, hm);
+    Wire.write(dataPacket);  /* sends a short cmd */
+    Wire.endTransmission();    /* stop transmitting */
+    Serial.print("Sent data to the slave: ");
+    Serial.println(dataPacket);
+
+    Wire.requestFrom(0x08, 28);         // request the payload from the slave
+    //gathers data comming from slave
+    int i=0; //counter for each byte as it arrives
+    while (Wire.available()) { 
+      datastr[i] = Wire.read(); // every character that arrives it put in order in the empty array datastr
+      i=i+1;
+      yield();
+    }
+    // parse this string
+    String ambtemp = getValue(datastr, ';', 0);
+    String ambhum = getValue(datastr, ';', 1);
+    String teletemp = getValue(datastr, ';', 2);
+    String deltat = getValue(datastr, ';', 3);
+    String heater = getValue(datastr, ';', 4);
+    String dewpt = getValue(datastr, ';', 5);
+    char * end;
+    Serial.println(ambtemp);
+    Serial.println(ambhum);
+    Serial.println(teletemp);
+    Serial.println(deltat);
+    Serial.println(heater);
+    Serial.println(dewpt);
+    at = strtod(ambtemp.c_str(), &end);
+    ah = strtod(ambhum.c_str(), &end);
+    tt = strtod(teletemp.c_str(), &end);
+    dp = strtod(dewpt.c_str(), &end);
+    hh = strtod(heater.c_str(), &end);
+    dt = strtod(deltat.c_str(), &end);
+    lastSlaveMessage = now; // Update last message time
+    Serial.print("Received data from slave: ");
+    Serial.print("Amb Temp: "); Serial.print(at, 2);
+    Serial.print(" °C, Amb Hum: "); Serial.print(ah, 2);
+    Serial.print(" %, Tel Temp: "); Serial.print(tt, 2);
+    Serial.print(" °C, Dew Point: "); Serial.print(dp, 2);
+    Serial.print(" °C, Heater Power: "); Serial.print(hh, 2);
+    Serial.print(" %, Delta T: "); Serial.print(dt, 2);
+    Serial.println(" °C");
+  }
+
+  // --- If ambient temp and humidity are 0, use MQTT-fed values ---
+  if ((at == 0.0 && ah == 0.0) && lastOpirSensorJson.length() > 0) {
+    // Parse JSON for ambtemp and ambhum (from OPIR sensor MQTT)
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, lastOpirSensorJson);
+    if (!err) {
+      if (doc.containsKey("aht_temp_now")) at = doc["aht_temp_now"];
+      if (doc.containsKey("aht_hum_now")) ah = doc["aht_hum_now"];
+      // Fallback to generic keys if present
+      if (doc.containsKey("ambtemp")) at = doc["ambtemp"];
+      if (doc.containsKey("ambhum")) ah = doc["ambhum"];
+    }
+  }
+
+  // --- If ambient humidity is 0, set heater power to 99.99% ---
+  if (ah == 0.0) {
+    hh = 99.99;
+  }
+
+  // --- Publish MQTT message every minute ---
+  if (now - lastMqttPublish >= 60000 || lastMqttPublish == 0) {
+    String payload = "{";
+    payload += "\"ambtemp\":" + String(at, 2) + ",";
+    payload += "\"ambhum\":" + String(ah, 2) + ",";
+    payload += "\"teltemp\":" + String(tt, 2) + ",";
+    payload += "\"dewpt\":" + String(dp, 2) + ",";
+    payload += "\"heaterpower\":" + String(hh, 2) + ",";
+    payload += "\"deltat\":" + String(dt, 2) + ",";
+    payload += "\"mode\":\"" + String(hm) + "\"";
+    payload += "}";
+    mqttClient.publish("obsybox/dewheater", payload.c_str());
+    lastMqttPublish = now;
+  }
 }
 
 
