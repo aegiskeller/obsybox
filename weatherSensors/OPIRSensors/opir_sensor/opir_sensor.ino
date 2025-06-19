@@ -100,6 +100,11 @@ void serveClient(WiFiClient& client) {
   float ahtTemp = temp.temperature;
   float ahtHum = humidity.relative_humidity;
 
+  float lux = tsl.calculateLux(full, ir);
+  if (isnan(lux)) {
+    lux = 0.0;
+  }
+
   // Serve main HTML page
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html");
