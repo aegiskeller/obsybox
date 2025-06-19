@@ -17,13 +17,14 @@ int in4 = 5;
 #define opened 3  // roof open sensor
 #define closed 2  // roof closed sensor
 
-int led = 10; // the pin the scope safe LED is connected to
+const unsigned long ROOF_LOST_TIMEOUT = 60000;
+int led = 11; // Use a different pin for the LED
 
 unsigned  long end_time;
 bool lost = false; //roof not reporting state
 
 void setup()  {
-end_time=millis()+60000; //roof lost reset timer ~60 seconds  change to suit  your rquirments to determine if roof is lost
+  end_time = millis() + ROOF_LOST_TIMEOUT; //roof lost reset timer ~60 seconds  change to suit  your rquirments to determine if roof is lost
 
   //Begin Serial Comunication(configured  for 9600baud)
   Serial.begin(9600);
@@ -128,8 +129,9 @@ void loop() {
     serialin = ""; 
   }
  
-  if (serialin == "get"){ // exteranl query  command to fetch RRCI data
-  
+  if (serialin == "get") { // exteranl query  command to fetch RRCI data
+    str = ""; // Clear at the start
+
     if (digitalRead(opened) == LOW){
       str += "opened,"; 
           
@@ -176,18 +178,14 @@ void loop() {
   //str = "";
 } 
    
-void Timer(){ // detect roof lost
-  if(millis()>=end_time){
-     //60 s have passed!!
-      if ((digitalRead(closed)  == HIGH) && (digitalRead(opened)) == HIGH){
-       lost = true; //where the heck  is the roof position?
-     }
-     
-             
-  } 
-    if ((digitalRead(closed)  == LOW) or (digitalRead(opened)) == LOW){
-             lost = false; //roof state  is known
-             end_time=millis()+60000; //reset the timer  
+void Timer() {
+  if (millis() >= end_time) {
+    if ((digitalRead(closed) == HIGH) && (digitalRead(opened) == HIGH)) {
+      lost = true;
+    }
   }
-  
+  if ((digitalRead(closed) == LOW) || (digitalRead(opened) == LOW)) {
+    lost = false;
+    end_time = millis() + ROOF_LOST_TIMEOUT;
+  }
 }
