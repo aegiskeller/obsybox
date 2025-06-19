@@ -100,7 +100,6 @@ void serveClient(WiFiClient& client) {
   float ahtTemp = temp.temperature;
   float ahtHum = humidity.relative_humidity;
 
-  float lux = tsl.calculateLux(full, ir);
   if (isnan(lux)) {
     lux = 0.0;
   }
@@ -171,6 +170,9 @@ void loop() {
     aht10.getEvent(&humidity, &temp);
     float ahtTemp = temp.temperature;
     float ahtHum = humidity.relative_humidity;
+    if (isnan(lux)) {
+      lux = 0.0;
+    }
 
     char payload[256];
     snprintf(payload, sizeof(payload),
