@@ -60,7 +60,7 @@ HOSTNAME=$(hostname)
 [ -z "$WIFI_SIGNAL" ] && WIFI_SIGNAL=0.0
 
 # Prepare JSON payload
-PAYLOAD="{\"cpu_temp\":$CPUTEMP,\"cpu_idle\":$CPU_IDLE,\"disk_free_gb\":$DISK_FREE,\"wifi_signal_dbm\":$WIFI_SIGNAL,\"hostname\":\"$HOSTNAME\"}"
+PAYLOAD="{\"cpu_temp\":$CPUTEMP,\"cpu_idle\":$CPU_IDLE,\"disk_free_gb\":$DISK_FREE,\"wifi_strength\":$WIFI_SIGNAL,\"hostname\":\"$HOSTNAME\"}"
 
 # Publish to MQTT using mosquitto_pub in a Docker container
 docker run --rm eclipse-mosquitto mosquitto_pub -h "$MQTT_BROKER" -t "$MQTT_TOPIC" -m "$PAYLOAD" -q 1
