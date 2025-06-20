@@ -2,7 +2,7 @@
 
 # Settings
 MQTT_BROKER="192.168.1.49"
-MQTT_TOPIC="obsybox/rpisys"
+MQTT_TOPIC="obsybox/system_monitoring"
 
 # Get CPU temperature (in Celsius)
 if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
