@@ -50,8 +50,16 @@ if [ -z "$WIFI_SIGNAL" ]; then
   WIFI_SIGNAL=null
 fi
 
+# Get hostname
+HOSTNAME=$(hostname)
+
 # Prepare JSON payload
-PAYLOAD="{\"cpu_temp\":$CPUTEMP,\"cpu_idle\":$CPU_IDLE,\"disk_free_gb\":$DISK_FREE,\"wifi_signal_dbm\":$WIFI_SIGNAL}"
+PAYLOAD="{\"cpu_temp\":$CPUTEMP,\"cpu_idle\":$CPU_IDLE,\"disk_free_gb\":$DISK_FREE,\"wifi_signal_dbm\":$WIFI_SIGNAL,\"hostname\":\"$HOSTNAME\"}"
 
 # Publish to MQTT using mosquitto_pub in a Docker container
 docker run --rm eclipse-mosquitto mosquitto_pub -h "$MQTT_BROKER" -t "$MQTT_TOPIC" -m "$PAYLOAD" -q 1
+# Check if the command was successful
+if [ $? -ne 0 ]; then
+  echo "Failed to publish MQTT message"
+  exit 1
+fi

@@ -15,7 +15,7 @@ import subprocess
 # 2. Ensure you have the WMI library available for Windows.
 # 3. Update the MQTT_BROKER variable with your MQTT broker's IP address.
 # 4. Run the script:
-#    python winSystemMonitor.py
+#    python minipc_sys.py
 
 try:
     import wmi
@@ -24,7 +24,7 @@ except ImportError:
     w = None
 
 MQTT_BROKER = "192.168.1.49"
-MQTT_TOPIC = "obsybox/rpisys"
+MQTT_TOPIC = "obsybox/system_monitoring"
 INTERVAL = 60  # seconds
 
 def get_cpu_temp():
