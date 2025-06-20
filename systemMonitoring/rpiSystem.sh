@@ -53,6 +53,12 @@ fi
 # Get hostname
 HOSTNAME=$(hostname)
 
+# Replace null or empty values with 0.0
+[ -z "$CPUTEMP" ] && CPUTEMP=0.0
+[ -z "$CPU_IDLE" ] && CPU_IDLE=0.0
+[ -z "$DISK_FREE" ] && DISK_FREE=0.0
+[ -z "$WIFI_SIGNAL" ] && WIFI_SIGNAL=0.0
+
 # Prepare JSON payload
 PAYLOAD="{\"cpu_temp\":$CPUTEMP,\"cpu_idle\":$CPU_IDLE,\"disk_free_gb\":$DISK_FREE,\"wifi_signal_dbm\":$WIFI_SIGNAL,\"hostname\":\"$HOSTNAME\"}"
 

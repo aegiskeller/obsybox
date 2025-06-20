@@ -5,18 +5,6 @@ import socket
 import paho.mqtt.client as mqtt
 import subprocess
 
-### This script monitors system metrics on a Windows machine and publishes them to an MQTT broker.
-# It retrieves CPU temperature, CPU load, disk space, hostname, and Wi-Fi signal strength.
-# Ensure you have the required libraries installed:
-# pip install psutil paho-mqtt wmi
-# Usage:
-# 1. Install the required libraries:    
-#    pip install psutil paho-mqtt wmi
-# 2. Ensure you have the WMI library available for Windows.
-# 3. Update the MQTT_BROKER variable with your MQTT broker's IP address.
-# 4. Run the script:
-#    python minipc_sys.py
-
 try:
     import wmi
     w = wmi.WMI(namespace="root\\wmi")
@@ -48,17 +36,20 @@ def get_wifi_strength():
     except Exception:
         return None
 
+def safe_value(val):
+    return 0.0 if val is None else val
+
 def main():
     client = mqtt.Client()
     client.connect(MQTT_BROKER, 1883, 60)
     client.loop_start()
 
     while True:
-        cpu_temp = get_cpu_temp()
-        cpu_load = psutil.cpu_percent(interval=1)
+        cpu_temp = safe_value(get_cpu_temp())
+        cpu_load = safe_value(psutil.cpu_percent(interval=1))
         disk = psutil.disk_usage('C:\\')
-        disk_free_gb = round(disk.free / (1024 ** 3), 2)
-        wifi_strength = get_wifi_strength()
+        disk_free_gb = safe_value(round(disk.free / (1024 ** 3), 2))
+        wifi_strength = safe_value(get_wifi_strength())
 
         payload = {
             "cpu_temp": cpu_temp,
