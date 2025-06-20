@@ -249,6 +249,21 @@ void loop() {
 
   unsigned long now = millis();
 
+  // --- Print sensor values every 10 seconds for debugging ---
+  static unsigned long lastDebugPrint = 0;
+  if (now - lastDebugPrint >= 10000 || lastDebugPrint == 0) {
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    int a = analogRead(ANEMOMETER_PIN);
+    Serial.print("[DEBUG] Raw Sensor Readings - Temp: ");
+    Serial.print(t);
+    Serial.print(" °C, Humidity: ");
+    Serial.print(h);
+    Serial.print(" %, Anemometer ADC: ");
+    Serial.println(a);
+    lastDebugPrint = now;
+  }
+
   // Start a new averaging cycle every minute
   if ((now - lastSampleTime > 60000 || lastSampleTime == 0) && sampleCount == 0) {
     sampleStartTime = now;
