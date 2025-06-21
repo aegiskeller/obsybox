@@ -357,11 +357,19 @@ void loadWeatherParamsFromEEPROM() {
   // Optionally add range checks here
 }
 
+// Add these globals for median safety logic
+const int SAFETY_HISTORY_LEN = 60; // 1 minute at 1s intervals
+bool safetyHistory[SAFETY_HISTORY_LEN];
+int safetyHistoryIdx = 0;
+unsigned long lastSafetySample = 0;
+unsigned long lastSafetyUpdate = 0;
+bool medianSafe = false;
+
 void loop() {
   // MQTT loop
   mqttClient.loop();
 
-  // Sample every 100ms
+  // Sample every 100ms for sensor averaging
   if (millis() - lastSampleTime >= 100) {
     lastSampleTime = millis();
     samples[sampleIndex] = analogRead(A0);
@@ -377,7 +385,6 @@ void loop() {
 
   // Parse weather values for safety check
   float cloudsVal = -1, windVal = -1, humidityVal = -1;
-  String reason = "";
   if (lastWeatherJson.length() > 0) {
     int hIdx = lastWeatherJson.indexOf("\"humidity\":");
     if (hIdx > 0) {
@@ -401,48 +408,47 @@ void loop() {
     }
   }
 
-  // Safety logic: not safe if any weather value exceeds user limits
-  bool isSafe = averagedValue < safeState;
-  reason = "";
-  if (averagedValue >= safeState) {
-    reason = "Rain sensor unsafe (" + String(averagedValue, 1) + " >= " + String(safeState, 1) + ")";
-    isSafe = false;
-  }
-  if ((cloudsVal >= 0 && cloudsVal > maxClouds)) {
-    reason = "Clouds too high (" + String(cloudsVal, 1) + " > " + String(maxClouds, 1) + ")";
-    isSafe = false;
-  }
-  if ((windVal >= 0 && windVal > maxWind)) {
-    reason = "Wind too high (" + String(windVal, 1) + " > " + String(maxWind, 1) + ")";
-    isSafe = false;
-  }
-  if ((humidityVal >= 0 && humidityVal > maxHumidity)) {
-    reason = "Humidity too high (" + String(humidityVal, 1) + " > " + String(maxHumidity, 1) + ")";
-    isSafe = false;
-  }
-  if (isSafe) {
-    reason = "All conditions safe";
+  // --- Poll safety state every second and store in history ---
+  if (millis() - lastSafetySample >= 1000 || lastSafetySample == 0) {
+    lastSafetySample = millis();
+
+    bool isSafe = averagedValue < safeState;
+    if ((cloudsVal >= 0 && cloudsVal > maxClouds)) isSafe = false;
+    if ((windVal >= 0 && windVal > maxWind)) isSafe = false;
+    if ((humidityVal >= 0 && humidityVal > maxHumidity)) isSafe = false;
+
+    safetyHistory[safetyHistoryIdx] = isSafe;
+    safetyHistoryIdx = (safetyHistoryIdx + 1) % SAFETY_HISTORY_LEN;
   }
 
-  // --- Publish safety status to MQTT ---
-  static int lastPublishedSafe = -1;
-  static String lastPublishedReason = "";
-  static unsigned long lastPublishTime = 0;
-  // Always publish at least every 60 seconds, or on change
-  if (isSafe != lastPublishedSafe || reason != lastPublishedReason || millis() - lastPublishTime > 60000) {
+  // --- Every minute, update the median safety state ---
+  if (millis() - lastSafetyUpdate >= 60000 || lastSafetyUpdate == 0) {
+    lastSafetyUpdate = millis();
+
+    // Copy history to a temp array and sort to find median
+    bool temp[SAFETY_HISTORY_LEN];
+    memcpy(temp, safetyHistory, SAFETY_HISTORY_LEN);
+    // Count number of true (safe) states
+    int safeCount = 0;
+    for (int i = 0; i < SAFETY_HISTORY_LEN; i++) {
+      if (temp[i]) safeCount++;
+    }
+    // Median: more than half are safe
+    medianSafe = (safeCount > SAFETY_HISTORY_LEN / 2);
+
+    // --- Publish safety status to MQTT ---
+    String reason = medianSafe ? "All conditions safe (median)" : "Unsafe (median)";
     String payload = "{\"safe\":";
-    payload += isSafe ? "true" : "false";
+    payload += medianSafe ? "true" : "false";
     payload += ",\"reason\":\"" + reason + "\"}";
     bool pubResult = mqttClient.publish("obsybox/weathersafety", payload);
     Serial.print("Publishing to obsybox/weathersafety: ");
     Serial.println(payload);
     Serial.print("Publish result: ");
     Serial.println(pubResult ? "OK" : "FAILED");
-    lastPublishedSafe = isSafe;
-    lastPublishedReason = reason;
-    lastPublishTime = millis();
   }
 
+  // --- Web server and serial handling remain unchanged ---
   WiFiClient client = server.available();
   if (client) {
     Serial.println("New client connected");
@@ -465,7 +471,7 @@ void loop() {
 
     // Serve root page for GET /
     if (req.indexOf("GET /") >= 0) {
-      sendRootHtml(client, isSafe);
+      sendRootHtml(client, medianSafe);
     } else {
       client.println("HTTP/1.1 404 Not Found");
       client.println("Content-Type: text/html");
@@ -501,7 +507,7 @@ void loop() {
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('#');
     if (cmd == "S") {
-      if (isSafe) {
+      if (medianSafe) {
         Serial.print("safe#");
       } else {
         Serial.print("notsafe#");

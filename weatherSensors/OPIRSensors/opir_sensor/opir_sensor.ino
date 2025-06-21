@@ -4,7 +4,7 @@
 #include <Adafruit_TSL2591.h>
 #include <Adafruit_MLX90614.h>
 #include <Adafruit_AHTX0.h>
-#include <PubSubClient.h>
+#include <ArduinoMqttClient.h>
 #include "arduino_secrets.h"
 
 // WiFi credentials
@@ -17,7 +17,7 @@ const int mqtt_port = 1883;
 const char* mqtt_topic = "obsybox/opir_sensor";
 
 WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
+MqttClient mqttClient(wifiClient);
 
 // Sensor objects
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
@@ -29,11 +29,13 @@ WiFiServer server(80);
 void reconnectMQTT() {
   while (!mqttClient.connected()) {
     Serial.print("Attempting MQTT connection...");
-    if (mqttClient.connect("OPIR_MKRWiFi")) {
+    mqttClient.setId("OPIR_MKRWiFi");
+    // mqttClient.setUsernamePassword("username", "password"); // Uncomment if needed
+    if (mqttClient.connect(mqtt_server, mqtt_port)) {
       Serial.println("connected");
     } else {
       Serial.print("failed, rc=");
-      Serial.print(mqttClient.state());
+      Serial.print(mqttClient.connectError());
       Serial.println(" try again in 5 seconds");
       delay(5000);
     }
@@ -63,7 +65,10 @@ void setup() {
   Serial.println("\nWiFi connected. IP address: ");
   Serial.println(WiFi.localIP());
 
-  mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setId("OPIR_MKRWiFi");
+  // mqttClient.setUsernamePassword("username", "password"); // Uncomment if needed
+  // mqttClient.setServer(mqtt_server, mqtt_port); // <-- REMOVE or COMMENT OUT this line
+  reconnectMQTT();
 
   if (!tsl.begin()) {
     Serial.println("TSL2591 not found. Check wiring!");
@@ -152,9 +157,8 @@ void loop() {
   }
 
   if (!mqttClient.connected()) {
-    reconnectMQTT();
+     reconnectMQTT();
   }
-  mqttClient.loop();
 
   unsigned long now = millis();
 
@@ -178,7 +182,10 @@ void loop() {
     snprintf(payload, sizeof(payload),
       "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"ir\":%u,\"full\":%u,\"aht_temp\":%.2f,\"aht_hum\":%.2f}",
       lux, objTemp, ambTemp, ir, full, ahtTemp, ahtHum);
-    mqttClient.publish(mqtt_topic, payload);
+
+    mqttClient.beginMessage(mqtt_topic);
+    mqttClient.print(payload);
+    mqttClient.endMessage();
 
     lastMqttPublish = now;
   }
