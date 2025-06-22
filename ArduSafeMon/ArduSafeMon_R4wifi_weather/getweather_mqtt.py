@@ -1,5 +1,7 @@
 # Fetch weather data from OpenWeatherMap and publish to MQTT topic obsybox/weather
 
+### NOT USED IN THIS VERSION, USE getweather_mqtt.py INSTEAD
+
 import requests
 import json
 import time

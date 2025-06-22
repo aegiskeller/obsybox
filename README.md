@@ -33,9 +33,9 @@ look for the driver 3.4.2014.8 dated 08/08/20141
 
 ## ip configuration
 192.168.1.73 == dewheater
-192.168.1.99  == Rain Sensor and weather conditions from OpenWeatherMap
-192.168.1.100 == ArduSafeMon_R4wifi_weather/ArduSafeMon_R4wifi - Sky Condition Sensors - /lux, /sky, /ambient
-192.168.1.101
+192.168.1.99  == Rain Sensor and weather conditions from OpenWeatherMap (these are sourced from the MiniPC via a scheduler task getweather_mqtt)
+192.168.1.100 == NOT WORKING ArduSafeMon_R4wifi_weather/ArduSafeMon_R4wifi - Sky Condition Sensors - /lux, /sky, /ambient
+192.168.1.101 == Sky Condition Sensors - /lux, /sky, /ambient
 192.168.1.183 == Wombat Weather Station - /temperature, /humidity, /windspeed
 192.168.1.148 == CameraWebServer - ESP32cam; many endpts /capture
 
