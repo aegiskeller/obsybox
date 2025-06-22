@@ -3,8 +3,6 @@
 import requests
 import json
 import time
-import threading
-import os
 import paho.mqtt.client as mqtt
 from weather_secrets import API_KEY, CITY, MQTT_BROKER, MQTT_PORT
 
