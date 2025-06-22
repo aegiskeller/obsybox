@@ -89,3 +89,14 @@ mosquitto      iotstack-mosquitto       "/docker-entrypoint.â¦"   mosquitto 
 nodered        iotstack-nodered         "./entrypoint.sh"        nodered        19 hours ago   Up 19 hours (healthy)   0.0.0.0:1880->1880/tcp, [::]:1880->1880/tcp
 
 portainer-ce   portainer/portainer-ce   "/portainer"             portainer-ce   19 hours ago   Up 19 hours             0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp, 0.0.0.0:9443->9443/tcp, [::]:9443->9443/tcp
+
+### MQTT Topics
+
+|Topic| Emitting Device| Description|
+|-----|----------------|------------|
+|obsybox/dewheater| dewheater Wemos D1| {"ambtemp":16.60,"ambhum":45.00,"teltemp":0.00,"dewpt":5.60,"heaterpower":99.00,"deltat":5.00,"mode":"A"}|
+|obsybox/weathersafety| ArduSafeMon Ardunino R4 Wifi| {"safe":true,"reason":"All conditions safe (median)"}|
+|obsybox/weather| getweather_mqtt.py sched task on miniPC| uses OpenSky API {"temperature": 13.57, "humidity": 44, "weather": "scattered clouds", "wind_speed": 2.92, "clouds": 27, "timestamp": 1750563615.6028142}|
+|obsybox/system_monitoring| minipc_sys.py sched task on mini pc; cron job rpiSystem.sh on Pis| {"cpu_temp": 21.1, "cpu_load": 12.0, "disk_free_gb": 67.2, "hostname": "wombat-mini-pc", "wifi_strength": 88}|
+|obsybox/anemometer| SparkFun Thing Dev|{"t":nan,"h":nan,"ws":nan}|
+|obsybox/opir_sensor|Arduino MKR 1010 Wifi|{"lux":143.56,"sky":11.81,"ambient":17.13,"ir":726,"full":2078,"aht_temp":16.20,"aht_hum":43.27}|
