@@ -7,7 +7,7 @@
 #include <Hash.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <PubSubClient.h> 
+#include <ArduinoMqttClient.h> // Use ArduinoMqttClient instead of PubSubClient
 #include "arduino_secrets.h"
 #include <ArduinoJson.h> // Add this for JSON parsing
 
@@ -333,7 +333,7 @@ void ServerNotFound(AsyncWebServerRequest *request) {
 }
 
 WiFiClient espClient;
-PubSubClient mqttClient(espClient);
+MqttClient mqttClient(espClient);
 
 // Buffer for MQTT message
 String lastOpirSensorJson = "";
@@ -369,10 +369,32 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // --- MQTT setup ---
-  mqttClient.setServer("192.168.1.49", 1883); // Set your broker IP and port
-  mqttClient.setCallback([](char* topic, byte* payload, unsigned int length) {
-    opirSensorCallback(topic, payload, length);
+  mqttClient.setId("dewheater_wemosd1mini");
+  mqttClient.setUsernamePassword("username", "password"); // Optional, if needed
+  // No setServer for ArduinoMqttClient
+
+  // Subscribe callback
+  mqttClient.onMessage([](int messageSize) {
+    String topic = mqttClient.messageTopic();
+    String payload;
+    while (mqttClient.available()) {
+      payload += (char)mqttClient.read();
+    }
+    if (topic == "obsybox/opir_sensor") {
+      lastOpirSensorJson = payload;
+      lastOpirSensorUpdate = millis();
+      Serial.print("Received opir_sensor MQTT: ");
+      Serial.println(lastOpirSensorJson);
+    }
   });
+
+  // Connect to MQTT broker
+  while (!mqttClient.connect("192.168.1.49", 1883)) {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println("MQTT connected!");
+  mqttClient.subscribe("obsybox/opir_sensor");
 
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -487,22 +509,15 @@ void setup() {
 void loop() {
   // --- MQTT reconnect logic ---
   if (!mqttClient.connected()) {
-    while (!mqttClient.connected()) {
+    while (!mqttClient.connect("192.168.1.49", 1883)) {
       Serial.print("Attempting MQTT connection...");
-      if (mqttClient.connect("dewheater_wemosd1mini")) {
-        Serial.println("connected");
-        mqttClient.subscribe("obsybox/opir_sensor"); // Subscribe to OPIR sensor topic
-      } else {
-        Serial.print("failed, rc=");
-        Serial.print(mqttClient.state());
-        Serial.println(" try again in 5 seconds");
-        delay(5000);
-      }
+      delay(5000);
     }
+    mqttClient.subscribe("obsybox/opir_sensor");
   }
-  mqttClient.loop();
+  mqttClient.poll(); // Use poll() instead of loop()
 
-  unsigned long now = millis(); // Only declare once
+  unsigned long now = millis();
 
   // Only send messages to the slave every 10 seconds
   if (now - lastSlaveMessage >= 10000 || lastSlaveMessage == 0) {
@@ -588,7 +603,11 @@ void loop() {
     payload += "\"deltat\":" + String(dt, 2) + ",";
     payload += "\"mode\":\"" + String(hm) + "\"";
     payload += "}";
-    mqttClient.publish("obsybox/dewheater", payload.c_str());
+
+    mqttClient.beginMessage("obsybox/dewheater");
+    mqttClient.print(payload);
+    mqttClient.endMessage();
+
     lastMqttPublish = now;
   }
 }
