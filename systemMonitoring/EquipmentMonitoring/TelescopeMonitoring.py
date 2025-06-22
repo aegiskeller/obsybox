@@ -15,7 +15,6 @@ MQTT_TOPIC_DOME = "obsybox/dome/status"
 MQTT_TOPIC_FILTERWHEEL = "obsybox/filterwheel/status"
 MQTT_TOPIC_FOCUSER = "obsybox/focuser/status"
 MQTT_TOPIC_GUIDER = "obsybox/guider/status"
-MQTT_TOPIC_SAFETYMON = "obsybox/safetymonitor/status"
 
 DEVICE_ID_FILE = "ascom_device_ids.json"
 
@@ -143,7 +142,7 @@ def get_focuser_status():
 
 def get_guider_status():
     pythoncom.CoInitialize()
-    device_id = get_device_id("Video", chooser_key="Guider")
+    device_id = get_device_id("Guider")
     if not device_id:
         print("No guider selected.")
         return {"connected": False}
@@ -159,23 +158,6 @@ def get_guider_status():
         status = {"connected": False}
     return status
 
-def get_safetymonitor_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("SafetyMonitor")
-    if not device_id:
-        print("No safety monitor selected.")
-        return {"connected": False}
-    safemon = win32com.client.Dispatch(device_id)
-    status = {}
-    try:
-        safemon.Connected = True
-        status["connected"] = True
-        status["is_safe"] = safemon.IsSafe if hasattr(safemon, "IsSafe") else None
-        safemon.Connected = False
-    except Exception as e:
-        print(f"SafetyMonitor error: {e}")
-        status = {"connected": False}
-    return status
 
 def publish(topic, payload):
     client = mqtt.Client()
@@ -203,6 +185,3 @@ if __name__ == "__main__":
 
     guider_status = get_guider_status()
     publish(MQTT_TOPIC_GUIDER, guider_status)
-
-    safemon_status = get_safetymonitor_status()
-    publish(MQTT_TOPIC_SAFETYMON, safemon_status)
