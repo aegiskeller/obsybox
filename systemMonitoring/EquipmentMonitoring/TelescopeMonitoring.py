@@ -33,7 +33,8 @@ def get_mount_ra_dec():
 def get_camera_status():
     pythoncom.CoInitialize()
     chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    camera_id = chooser.Choose("Camera")
+    chooser.DeviceType = "Camera"
+    camera_id = chooser.Choose(None)
     if not camera_id:
         print("No camera selected.")
         return {"connected": False}
