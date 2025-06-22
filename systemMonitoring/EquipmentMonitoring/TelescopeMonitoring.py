@@ -55,7 +55,8 @@ def get_camera_status():
 def get_dome_status():
     pythoncom.CoInitialize()
     chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    dome_id = chooser.Choose("Dome")
+    chooser.DeviceType = "Dome"
+    dome_id = chooser.Choose(None)
     if not dome_id:
         print("No dome selected.")
         return {"connected": False}
@@ -74,7 +75,8 @@ def get_dome_status():
 def get_filterwheel_status():
     pythoncom.CoInitialize()
     chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    fw_id = chooser.Choose("FilterWheel")
+    chooser.DeviceType = "FilterWheel"
+    fw_id = chooser.Choose(None)
     if not fw_id:
         print("No filter wheel selected.")
         return {"connected": False}
@@ -102,7 +104,8 @@ def get_filterwheel_status():
 def get_focuser_status():
     pythoncom.CoInitialize()
     chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    focuser_id = chooser.Choose("Focuser")
+    chooser.DeviceType = "Focuser"
+    focuser_id = chooser.Choose(None)
     if not focuser_id:
         print("No focuser selected.")
         return {"connected": False}
@@ -122,7 +125,8 @@ def get_focuser_status():
 def get_guider_status():
     pythoncom.CoInitialize()
     chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    guider_id = chooser.Choose("Video")
+    chooser.DeviceType = "Video"
+    guider_id = chooser.Choose(None)
     if not guider_id:
         print("No guider selected.")
         return {"connected": False}
@@ -141,7 +145,8 @@ def get_guider_status():
 def get_safetymonitor_status():
     pythoncom.CoInitialize()
     chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    safemon_id = chooser.Choose("SafetyMonitor")
+    chooser.DeviceType = "SafetyMonitor"
+    safemon_id = chooser.Choose(None)
     if not safemon_id:
         print("No safety monitor selected.")
         return {"connected": False}
@@ -150,7 +155,6 @@ def get_safetymonitor_status():
     try:
         safemon.Connected = True
         status["connected"] = True
-        # ASCOM SafetyMonitor interface: IsSafe property
         status["is_safe"] = safemon.IsSafe if hasattr(safemon, "IsSafe") else None
         safemon.Connected = False
     except Exception as e:
