@@ -3,6 +3,7 @@ import json
 import pythoncom
 import win32com.client
 import paho.mqtt.client as mqtt
+import os
 
 sys.path.append(r"C:\Program Files (x86)\Common Files\ASCOM\Platform")
 
@@ -16,13 +17,39 @@ MQTT_TOPIC_FOCUSER = "obsybox/focuser/status"
 MQTT_TOPIC_GUIDER = "obsybox/guider/status"
 MQTT_TOPIC_SAFETYMON = "obsybox/safetymonitor/status"
 
+DEVICE_ID_FILE = "ascom_device_ids.json"
+
+def load_device_ids():
+    if os.path.exists(DEVICE_ID_FILE):
+        with open(DEVICE_ID_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_device_ids(ids):
+    with open(DEVICE_ID_FILE, "w") as f:
+        json.dump(ids, f)
+
+def get_device_id(device_type, chooser_key=None):
+    ids = load_device_ids()
+    key = chooser_key if chooser_key else device_type
+    if key in ids:
+        return ids[key]
+    pythoncom.CoInitialize()
+    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
+    chooser.DeviceType = device_type
+    device_id = chooser.Choose(None)
+    if device_id:
+        ids[key] = device_id
+        save_device_ids(ids)
+    return device_id
+
 def get_mount_ra_dec():
     pythoncom.CoInitialize()
-    telescope = win32com.client.Dispatch("ASCOM.Utilities.Chooser").Choose("Telescope")
-    if not telescope:
+    device_id = get_device_id("Telescope")
+    if not device_id:
         print("No telescope selected.")
         return None, None
-    scope = win32com.client.Dispatch(telescope)
+    scope = win32com.client.Dispatch(device_id)
     if not scope.Connected:
         scope.Connected = True
     ra = scope.RightAscension
@@ -32,13 +59,11 @@ def get_mount_ra_dec():
 
 def get_camera_status():
     pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = "Camera"
-    camera_id = chooser.Choose(None)
-    if not camera_id:
+    device_id = get_device_id("Camera")
+    if not device_id:
         print("No camera selected.")
         return {"connected": False}
-    cam = win32com.client.Dispatch(camera_id)
+    cam = win32com.client.Dispatch(device_id)
     status = {}
     try:
         cam.Connected = True
@@ -54,13 +79,11 @@ def get_camera_status():
 
 def get_dome_status():
     pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = "Dome"
-    dome_id = chooser.Choose(None)
-    if not dome_id:
+    device_id = get_device_id("Dome")
+    if not device_id:
         print("No dome selected.")
         return {"connected": False}
-    dome = win32com.client.Dispatch(dome_id)
+    dome = win32com.client.Dispatch(device_id)
     status = {}
     try:
         dome.Connected = True
@@ -74,13 +97,11 @@ def get_dome_status():
 
 def get_filterwheel_status():
     pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = "FilterWheel"
-    fw_id = chooser.Choose(None)
-    if not fw_id:
+    device_id = get_device_id("FilterWheel")
+    if not device_id:
         print("No filter wheel selected.")
         return {"connected": False}
-    fw = win32com.client.Dispatch(fw_id)
+    fw = win32com.client.Dispatch(device_id)
     status = {}
     try:
         fw.Connected = True
@@ -103,13 +124,11 @@ def get_filterwheel_status():
 
 def get_focuser_status():
     pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = "Focuser"
-    focuser_id = chooser.Choose(None)
-    if not focuser_id:
+    device_id = get_device_id("Focuser")
+    if not device_id:
         print("No focuser selected.")
         return {"connected": False}
-    focuser = win32com.client.Dispatch(focuser_id)
+    focuser = win32com.client.Dispatch(device_id)
     status = {}
     try:
         focuser.Connected = True
@@ -124,13 +143,11 @@ def get_focuser_status():
 
 def get_guider_status():
     pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = "Video"
-    guider_id = chooser.Choose(None)
-    if not guider_id:
+    device_id = get_device_id("Video", chooser_key="Guider")
+    if not device_id:
         print("No guider selected.")
         return {"connected": False}
-    guider = win32com.client.Dispatch(guider_id)
+    guider = win32com.client.Dispatch(device_id)
     status = {}
     try:
         guider.Connected = True
@@ -144,13 +161,11 @@ def get_guider_status():
 
 def get_safetymonitor_status():
     pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = "SafetyMonitor"
-    safemon_id = chooser.Choose(None)
-    if not safemon_id:
+    device_id = get_device_id("SafetyMonitor")
+    if not device_id:
         print("No safety monitor selected.")
         return {"connected": False}
-    safemon = win32com.client.Dispatch(safemon_id)
+    safemon = win32com.client.Dispatch(device_id)
     status = {}
     try:
         safemon.Connected = True
