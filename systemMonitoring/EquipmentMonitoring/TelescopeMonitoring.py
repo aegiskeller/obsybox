@@ -13,8 +13,6 @@ MQTT_TOPIC_MOUNT = "obsybox/telescope/position"
 MQTT_TOPIC_CAMERA = "obsybox/camera/status"
 MQTT_TOPIC_DOME = "obsybox/dome/status"
 MQTT_TOPIC_FILTERWHEEL = "obsybox/filterwheel/status"
-MQTT_TOPIC_FOCUSER = "obsybox/focuser/status"
-MQTT_TOPIC_GUIDER = "obsybox/guider/status"
 
 DEVICE_ID_FILE = "ascom_device_ids.json"
 
@@ -121,43 +119,6 @@ def get_filterwheel_status():
         status = {"connected": False}
     return status
 
-def get_focuser_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Focuser")
-    if not device_id:
-        print("No focuser selected.")
-        return {"connected": False}
-    focuser = win32com.client.Dispatch(device_id)
-    status = {}
-    try:
-        focuser.Connected = True
-        status["connected"] = True
-        status["position"] = focuser.Position if hasattr(focuser, "Position") else None
-        status["temperature"] = focuser.Temperature if hasattr(focuser, "Temperature") else None
-        focuser.Connected = False
-    except Exception as e:
-        print(f"Focuser error: {e}")
-        status = {"connected": False}
-    return status
-
-def get_guider_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Guider")
-    if not device_id:
-        print("No guider selected.")
-        return {"connected": False}
-    guider = win32com.client.Dispatch(device_id)
-    status = {}
-    try:
-        guider.Connected = True
-        status["connected"] = True
-        status["state"] = getattr(guider, "State", None)
-        guider.Connected = False
-    except Exception as e:
-        print(f"Guider error: {e}")
-        status = {"connected": False}
-    return status
-
 
 def publish(topic, payload):
     client = mqtt.Client()
@@ -179,9 +140,3 @@ if __name__ == "__main__":
 
     filterwheel_status = get_filterwheel_status()
     publish(MQTT_TOPIC_FILTERWHEEL, filterwheel_status)
-
-    focuser_status = get_focuser_status()
-    publish(MQTT_TOPIC_FOCUSER, focuser_status)
-
-    guider_status = get_guider_status()
-    publish(MQTT_TOPIC_GUIDER, guider_status)
