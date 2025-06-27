@@ -6,7 +6,7 @@ from tapo import ApiClient
 import paho.mqtt.client as mqtt
 import time
 
-MQTT_BROKER = "localhost"  # Change to your MQTT broker address if needed
+MQTT_BROKER = "192.168.1.49"  # Change to your MQTT broker address if needed
 MQTT_PORT = 1883
 MQTT_TOPIC = "obsybox/power_usage"
 
