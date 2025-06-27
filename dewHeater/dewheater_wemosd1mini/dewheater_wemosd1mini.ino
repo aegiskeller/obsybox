@@ -352,6 +352,9 @@ void opirSensorCallback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+unsigned long lastHeartbeat = 0;
+bool heartbeatState = false;
+
 void setup() {
   Serial.begin(9600); /* begin serial for debug */
   Wire.begin(); /* join i2c bus with std settings */
@@ -370,8 +373,6 @@ void setup() {
 
   // --- MQTT setup ---
   mqttClient.setId("dewheater_wemosd1mini");
-  mqttClient.setUsernamePassword("username", "password"); // Optional, if needed
-  // No setServer for ArduinoMqttClient
 
   // Subscribe callback
   mqttClient.onMessage([](int messageSize) {
@@ -421,10 +422,10 @@ void setup() {
         function fetchOpirSensor() {
           fetch('/opir_sensor').then(r=>r.json()).then(data=>{
             let txt = "OPIR Sensor: ";
-            if(data && data.ambtemp!==undefined && data.ambhum!==undefined) {
-              txt += "Ambient Temp: " + data.ambtemp + " °C, Humidity: " + data.ambhum + " %";
+            if(data && data.aht_temp!==undefined && data.aht_hum!==undefined) {
+              txt += "Ambient Temp: " + data.aht_temp + " °C, Humidity: " + data.aht_hum + " %";
             } else {
-              txt += "No data";
+              txt += "Data not available";
             }
             document.getElementById("opirSensorData").innerHTML = txt;
           });
@@ -507,6 +508,13 @@ void setup() {
 }
 
 void loop() {
+  // --- Heartbeat on onboard LED every 0.5s ---
+  if (millis() - lastHeartbeat >= 500) {
+    heartbeatState = !heartbeatState;
+    digitalWrite(LED_BUILTIN, heartbeatState ? LOW : HIGH); // LOW = ON for ESP8266
+    lastHeartbeat = millis();
+  }
+
   // --- MQTT reconnect logic ---
   if (!mqttClient.connected()) {
     while (!mqttClient.connect("192.168.1.49", 1883)) {
@@ -550,12 +558,6 @@ void loop() {
     String heater = getValue(datastr, ';', 4);
     String dewpt = getValue(datastr, ';', 5);
     char * end;
-    Serial.println(ambtemp);
-    Serial.println(ambhum);
-    Serial.println(teletemp);
-    Serial.println(deltat);
-    Serial.println(heater);
-    Serial.println(dewpt);
     at = strtod(ambtemp.c_str(), &end);
     ah = strtod(ambhum.c_str(), &end);
     tt = strtod(teletemp.c_str(), &end);

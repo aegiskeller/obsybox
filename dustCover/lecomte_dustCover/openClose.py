@@ -32,13 +32,17 @@ def close_shutter():
     send_command("COMMAND:CLOSE")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1].lower() not in ("open", "close"):
-        print("Usage: python openClose.py [open|close]")
-        sys.exit(1)
-    action = sys.argv[1].lower()
-    if action == "open":
-        print("Opening shutter...")
-        open_shutter()
-    elif action == "close":
-        print("Closing shutter...")
-        close_shutter()
+    try:
+        if len(sys.argv) < 2 or sys.argv[1].lower() not in ("open", "close"):
+            print("Usage: python openClose.py [open|close]")
+            sys.exit(1)
+        action = sys.argv[1].lower()
+        if action == "open":
+            print("Opening shutter...")
+            open_shutter()
+        elif action == "close":
+            print("Closing shutter...")
+            close_shutter()
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(2)
