@@ -1,1 +1,1 @@
-*/3 * * * * /bin/bash /home/sckelle/Documents/systemMonitoring/rpiSystem.sh
+*/3 * * * * /bin/bash /home/sckelle/Documents/obsybox/systemMonitoring/ComputeMonitoring/rpiSystem.sh
