@@ -68,6 +68,7 @@ def get_camera_status():
     status = {}
     try:
         cam.Connected = True
+        time.sleep(1)  # Give hardware/driver time to update status
         status["connected"] = True
         status["cooler_on"] = cam.CoolerOn if hasattr(cam, "CoolerOn") else None
         status["cooler_power"] = cam.CoolerPower if hasattr(cam, "CoolerPower") else None
