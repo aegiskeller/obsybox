@@ -30,7 +30,6 @@ void reconnectMQTT() {
   while (!mqttClient.connected()) {
     Serial.print("Attempting MQTT connection...");
     mqttClient.setId("OPIR_MKRWiFi");
-    // mqttClient.setUsernamePassword("username", "password"); // Uncomment if needed
     if (mqttClient.connect(mqtt_server, mqtt_port)) {
       Serial.println("connected");
     } else {
@@ -49,7 +48,7 @@ void setup() {
 
   Wire.begin();
 
-  // Static IP configuration (optional, remove if not needed)
+  // Static IP configuration 
   IPAddress local_IP(192, 168, 1, 101);
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
@@ -66,8 +65,6 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   mqttClient.setId("OPIR_MKRWiFi");
-  // mqttClient.setUsernamePassword("username", "password"); // Uncomment if needed
-  // mqttClient.setServer(mqtt_server, mqtt_port); // <-- REMOVE or COMMENT OUT this line
   reconnectMQTT();
 
   if (!tsl.begin()) {
@@ -159,6 +156,7 @@ void loop() {
   if (!mqttClient.connected()) {
      reconnectMQTT();
   }
+  mqttClient.poll();
 
   unsigned long now = millis();
 

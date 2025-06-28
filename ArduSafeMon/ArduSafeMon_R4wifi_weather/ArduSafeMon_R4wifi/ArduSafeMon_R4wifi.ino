@@ -366,7 +366,17 @@ unsigned long lastSafetyUpdate = 0;
 bool medianSafe = false;
 
 void loop() {
-  // MQTT loop
+  // --- MQTT reconnect logic ---
+  if (!mqttClient.connected()) {
+    Serial.println("MQTT disconnected, attempting reconnect...");
+    while (!mqttClient.connect("ArduSafeMon_R4wifi")) {
+      Serial.print(".");
+      delay(1000);
+    }
+    Serial.println("MQTT reconnected!");
+    mqttClient.subscribe(mqtt_topic); // re-subscribe after reconnect
+  }
+
   mqttClient.loop();
 
   // Sample every 100ms for sensor averaging
