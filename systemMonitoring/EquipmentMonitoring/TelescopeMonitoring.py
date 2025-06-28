@@ -17,8 +17,6 @@ MQTT_TOPIC_CAMERA = "obsybox/camera/status"
 MQTT_TOPIC_DOME = "obsybox/dome/status"
 MQTT_TOPIC_FILTERWHEEL = "obsybox/filterwheel/status"
 MQTT_TOPIC_FOCUSER = "obsybox/focuser/status"
-MQTT_TOPIC_GUIDER = "obsybox/guider/status"
-MQTT_TOPIC_SAFETYMONITOR = "obsybox/safetymonitor/status"
 
 DEVICE_ID_FILE = "ascom_device_ids.json"
 
@@ -147,46 +145,6 @@ def get_focuser_status():
         status = {"connected": False}
     return status
 
-def get_guider_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Guider")
-    if not device_id:
-        print("No guider selected.")
-        return {"connected": False}
-    guider = win32com.client.Dispatch(device_id)
-    status = {}
-    try:
-        guider.Connected = True
-        status["connected"] = True
-        # Example properties, adjust as needed for your guider's ASCOM driver
-        status["is_guiding"] = getattr(guider, "IsGuiding", None)
-        status["last_error"] = getattr(guider, "LastError", None)
-        guider.Connected = False
-    except Exception as e:
-        print(f"Guider error: {e}")
-        status = {"connected": False}
-    return status
-
-def get_safetymonitor_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("SafetyMonitor")
-    if not device_id:
-        print("No safety monitor selected.")
-        return {"connected": False}
-    sm = win32com.client.Dispatch(device_id)
-    status = {}
-    try:
-        sm.Connected = True
-        status["connected"] = True
-        # Standard ASCOM SafetyMonitor property
-        status["is_safe"] = sm.IsSafe if hasattr(sm, "IsSafe") else None
-        sm.Connected = False
-    except Exception as e:
-        print(f"SafetyMonitor error: {e}")
-        status = {"connected": False}
-    return status
-
-
 def publish(topic, payload, retries=3, delay=2):
     for attempt in range(retries):
         try:
@@ -217,9 +175,3 @@ if __name__ == "__main__":
 
     focuser_status = get_focuser_status()
     publish(MQTT_TOPIC_FOCUSER, focuser_status)
-
-    guider_status = get_guider_status()
-    publish(MQTT_TOPIC_GUIDER, guider_status)
-
-    safetymonitor_status = get_safetymonitor_status()
-    publish(MQTT_TOPIC_SAFETYMONITOR, safetymonitor_status)
