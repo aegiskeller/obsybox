@@ -16,7 +16,7 @@ if os.path.exists("secrets.py"):
 else:
     tapo_username = "your_tapo_username"
     tapo_password = "your_tapo_password"
-    tapo_p110_ips = ["192.168.1.34"]
+    tapo_p110_ips = ["192.168.1.102"] # this is the reserved ip for the tapo p110
 
 async def get_power(ip, tapo_username, tapo_password):
     try:
