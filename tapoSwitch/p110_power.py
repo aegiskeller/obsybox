@@ -1,6 +1,5 @@
-"""Scan for Tapo P110 devices and report power usage to MQTT every 30 seconds."""
+"""Query Tapo P110 devices and publish power usage to MQTT. Intended for use as a cron job."""
 
-import asyncio
 import os
 from tapo import ApiClient
 import paho.mqtt.client as mqtt
@@ -16,45 +15,40 @@ if os.path.exists("secrets.py"):
 else:
     tapo_username = "your_tapo_username"
     tapo_password = "your_tapo_password"
-    tapo_p110_ips = ["192.168.1.34"]  
+    tapo_p110_ips = ["192.168.1.34"]
 
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("Connected to MQTT broker.")
-    else:
-        print(f"Failed to connect to MQTT broker, rc={rc}")
-
-def on_disconnect(client, userdata, rc):
-    print("Disconnected from MQTT broker. Will attempt to reconnect...")
-
-async def main():
+def main():
     client = mqtt.Client()
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.loop_start()  # Start background thread for reconnects
+    try:
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    except Exception as e:
+        print(f"Failed to connect to MQTT broker: {e}")
+        return
 
-    print("Checking Tapo P110 devices for power usage every 30 seconds...")
-    while True:
-        for ip in tapo_p110_ips:
-            print(f"Checking Tapo P110: {ip}")
-            try:
-                tapo_client = ApiClient(tapo_username, tapo_password)
-                device = await tapo_client.p110(ip)
-                energy = await device.get_energy_usage()
-                print(f"Power usage for {ip}: {energy.current_power} W")
-                payload = {
-                    "ip": ip,
-                    "power": energy.current_power,
-                    "timestamp": int(time.time())
-                }
-                if client.is_connected():
-                    client.publish(MQTT_TOPIC, str(payload))
-                else:
-                    print("MQTT not connected, skipping publish.")
-            except Exception as e:
-                print(f"Failed to get power usage for {ip}: {e}")
-        await asyncio.sleep(30)
+    for ip in tapo_p110_ips:
+        print(f"Checking Tapo P110: {ip}")
+        try:
+            tapo_client = ApiClient(tapo_username, tapo_password)
+            device = tapo_client.p110(ip)
+            energy = device.get_energy_usage()
+            # If using python-tapo >=3.0, these may be coroutines; if so, use asyncio.run() or await
+            if hasattr(energy, "current_power"):
+                power = energy.current_power
+            elif isinstance(energy, dict) and "current_power" in energy:
+                power = energy["current_power"]
+            else:
+                power = None
+            print(f"Power usage for {ip}: {power} W")
+            payload = {
+                "ip": ip,
+                "power": power,
+                "timestamp": int(time.time())
+            }
+            client.publish(MQTT_TOPIC, str(payload))
+        except Exception as e:
+            print(f"Failed to get power usage for {ip}: {e}")
+
+    client.disconnect()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
