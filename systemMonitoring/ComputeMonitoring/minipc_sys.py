@@ -39,8 +39,27 @@ def get_wifi_strength():
 def safe_value(val):
     return 0.0 if val is None else val
 
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("Connected to MQTT broker.")
+    else:
+        print(f"Failed to connect to MQTT broker, rc={rc}")
+
+def on_disconnect(client, userdata, rc):
+    print("Disconnected from MQTT broker. Will attempt to reconnect...")
+    while True:
+        try:
+            client.reconnect()
+            print("Reconnected to MQTT broker.")
+            break
+        except Exception as e:
+            print(f"Reconnect failed: {e}")
+            time.sleep(5)
+
 def main():
     client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.connect(MQTT_BROKER, 1883, 60)
     client.loop_start()
 
@@ -59,8 +78,12 @@ def main():
             "wifi_strength": wifi_strength
         }
 
-        client.publish(MQTT_TOPIC, json.dumps(payload), qos=1)
-        print("Published:", payload)
+        if client.is_connected():
+            client.publish(MQTT_TOPIC, json.dumps(payload), qos=1)
+            print("Published:", payload)
+        else:
+            print("MQTT not connected, skipping publish.")
+
         time.sleep(INTERVAL)
 
 if __name__ == "__main__":

@@ -17,9 +17,23 @@ else:
     tapo_username = "your_tapo_username"
     tapo_password = "your_tapo_password"
     tapo_p110_ips = ["192.168.1.34"]  
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("Connected to MQTT broker.")
+    else:
+        print(f"Failed to connect to MQTT broker, rc={rc}")
+
+def on_disconnect(client, userdata, rc):
+    print("Disconnected from MQTT broker. Will attempt to reconnect...")
+
 async def main():
     client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.loop_start()  # Start background thread for reconnects
+
     print("Checking Tapo P110 devices for power usage every 30 seconds...")
     while True:
         for ip in tapo_p110_ips:
@@ -34,7 +48,10 @@ async def main():
                     "power": energy.current_power,
                     "timestamp": int(time.time())
                 }
-                client.publish(MQTT_TOPIC, str(payload))
+                if client.is_connected():
+                    client.publish(MQTT_TOPIC, str(payload))
+                else:
+                    print("MQTT not connected, skipping publish.")
             except Exception as e:
                 print(f"Failed to get power usage for {ip}: {e}")
         await asyncio.sleep(30)

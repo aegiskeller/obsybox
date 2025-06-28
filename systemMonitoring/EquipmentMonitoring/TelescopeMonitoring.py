@@ -4,6 +4,7 @@ import pythoncom
 import win32com.client
 import paho.mqtt.client as mqtt
 import os
+import time
 
 sys.path.append(r"C:\Program Files (x86)\Common Files\ASCOM\Platform")
 
@@ -120,12 +121,19 @@ def get_filterwheel_status():
     return status
 
 
-def publish(topic, payload):
-    client = mqtt.Client()
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.publish(topic, json.dumps(payload))
-    print(f"Published to {topic}: {payload}")
-    client.disconnect()
+def publish(topic, payload, retries=3, delay=2):
+    for attempt in range(retries):
+        try:
+            client = mqtt.Client()
+            client.connect(MQTT_BROKER, MQTT_PORT, 60)
+            client.publish(topic, json.dumps(payload))
+            print(f"Published to {topic}: {payload}")
+            client.disconnect()
+            return
+        except Exception as e:
+            print(f"MQTT publish failed (attempt {attempt+1}/{retries}): {e}")
+            time.sleep(delay)
+    print(f"Failed to publish to {topic} after {retries} attempts.")
 
 if __name__ == "__main__":
     ra, dec = get_mount_ra_dec()
