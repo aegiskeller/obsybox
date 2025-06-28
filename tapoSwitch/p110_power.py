@@ -1,6 +1,7 @@
 """Query Tapo P110 devices and publish power usage to MQTT. Intended for use as a cron job."""
 
 import os
+import asyncio
 from tapo import ApiClient
 import paho.mqtt.client as mqtt
 import time
@@ -17,7 +18,19 @@ else:
     tapo_password = "your_tapo_password"
     tapo_p110_ips = ["192.168.1.34"]
 
-def main():
+async def get_power(ip, tapo_username, tapo_password):
+    try:
+        tapo_client = ApiClient(tapo_username, tapo_password)
+        device = await tapo_client.p110(ip)
+        energy = await device.get_energy_usage()
+        power = energy.current_power
+        print(f"Power usage for {ip}: {power} W")
+        return {"ip": ip, "power": power, "timestamp": int(time.time())}
+    except Exception as e:
+        print(f"Failed to get power usage for {ip}: {e}")
+        return None
+
+async def main():
     client = mqtt.Client()
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
@@ -25,30 +38,13 @@ def main():
         print(f"Failed to connect to MQTT broker: {e}")
         return
 
-    for ip in tapo_p110_ips:
-        print(f"Checking Tapo P110: {ip}")
-        try:
-            tapo_client = ApiClient(tapo_username, tapo_password)
-            device = tapo_client.p110(ip)
-            energy = device.get_energy_usage()
-            # If using python-tapo >=3.0, these may be coroutines; if so, use asyncio.run() or await
-            if hasattr(energy, "current_power"):
-                power = energy.current_power
-            elif isinstance(energy, dict) and "current_power" in energy:
-                power = energy["current_power"]
-            else:
-                power = None
-            print(f"Power usage for {ip}: {power} W")
-            payload = {
-                "ip": ip,
-                "power": power,
-                "timestamp": int(time.time())
-            }
+    tasks = [get_power(ip, tapo_username, tapo_password) for ip in tapo_p110_ips]
+    results = await asyncio.gather(*tasks)
+    for payload in results:
+        if payload is not None:
             client.publish(MQTT_TOPIC, str(payload))
-        except Exception as e:
-            print(f"Failed to get power usage for {ip}: {e}")
 
     client.disconnect()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

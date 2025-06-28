@@ -100,4 +100,5 @@ portainer-ce   portainer/portainer-ce   "/portainer"             portainer-ce   
 |obsybox/system_monitoring| minipc_sys.py sched task on mini pc; cron job rpiSystem.sh on Pis| {"cpu_temp": 21.1, "cpu_load": 12.0, "disk_free_gb": 67.2, "hostname": "wombat-mini-pc", "wifi_strength": 88}|
 |obsybox/anemometer| SparkFun Thing Dev|{"t":nan,"h":nan,"ws":nan}|
 |obsybox/opir_sensor|Arduino MKR 1010 Wifi|{"lux":143.56,"sky":11.81,"ambient":17.13,"ir":726,"full":2078,"aht_temp":16.20,"aht_hum":43.27}|
-|obsybox/power_usage| Tapo P110 plug from 192.168.1.49| ip, power, timestamp|
+|obsybox/power_usage| Tapo P110 plug from 192.168.1.49 once a minute; on rpis50| ip, power, timestamp|
+
