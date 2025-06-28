@@ -148,7 +148,7 @@ def get_focuser_status():
 def publish(topic, payload, retries=3, delay=2):
     for attempt in range(retries):
         try:
-            client = mqtt.Client()
+            client = mqtt.Client(protocol=mqtt.MQTTv5)
             client.connect(MQTT_BROKER, MQTT_PORT, 60)
             client.publish(topic, json.dumps(payload))
             print(f"Published to {topic}: {payload}")
