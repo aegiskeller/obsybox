@@ -132,12 +132,13 @@ def get_focuser_status():
     focuser = win32com.client.Dispatch(device_id)
     status = {}
     try:
-        focuser.Connected = True
-        status["connected"] = True
-        status["position"] = focuser.Position if hasattr(focuser, "Position") else None
-        status["is_moving"] = focuser.IsMoving if hasattr(focuser, "IsMoving") else None
-        status["temperature"] = focuser.Temperature if hasattr(focuser, "Temperature") else None
-        focuser.Connected = False
+        if focuser.Connected:
+            status["connected"] = True
+            status["position"] = focuser.Position if hasattr(focuser, "Position") else None
+            status["is_moving"] = focuser.IsMoving if hasattr(focuser, "IsMoving") else None
+            status["temperature"] = focuser.Temperature if hasattr(focuser, "Temperature") else None
+        else:
+            status["connected"] = False
     except Exception as e:
         print(f"Focuser error: {e}")
         status = {"connected": False}
