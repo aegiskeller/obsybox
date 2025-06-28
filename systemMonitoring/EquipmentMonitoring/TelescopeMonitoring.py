@@ -6,6 +6,8 @@ import paho.mqtt.client as mqtt
 import os
 import time
 
+### to be run on the mini-pc
+
 sys.path.append(r"C:\Program Files (x86)\Common Files\ASCOM\Platform")
 
 MQTT_BROKER = "localhost"
@@ -14,6 +16,7 @@ MQTT_TOPIC_MOUNT = "obsybox/telescope/position"
 MQTT_TOPIC_CAMERA = "obsybox/camera/status"
 MQTT_TOPIC_DOME = "obsybox/dome/status"
 MQTT_TOPIC_FILTERWHEEL = "obsybox/filterwheel/status"
+MQTT_TOPIC_FOCUSER = "obsybox/focuser/status"
 
 DEVICE_ID_FILE = "ascom_device_ids.json"
 
@@ -120,6 +123,26 @@ def get_filterwheel_status():
         status = {"connected": False}
     return status
 
+def get_focuser_status():
+    pythoncom.CoInitialize()
+    device_id = get_device_id("Focuser")
+    if not device_id:
+        print("No focuser selected.")
+        return {"connected": False}
+    focuser = win32com.client.Dispatch(device_id)
+    status = {}
+    try:
+        focuser.Connected = True
+        status["connected"] = True
+        status["position"] = focuser.Position if hasattr(focuser, "Position") else None
+        status["is_moving"] = focuser.IsMoving if hasattr(focuser, "IsMoving") else None
+        status["temperature"] = focuser.Temperature if hasattr(focuser, "Temperature") else None
+        focuser.Connected = False
+    except Exception as e:
+        print(f"Focuser error: {e}")
+        status = {"connected": False}
+    return status
+
 
 def publish(topic, payload, retries=3, delay=2):
     for attempt in range(retries):
@@ -148,3 +171,6 @@ if __name__ == "__main__":
 
     filterwheel_status = get_filterwheel_status()
     publish(MQTT_TOPIC_FILTERWHEEL, filterwheel_status)
+
+    focuser_status = get_focuser_status()
+    publish(MQTT_TOPIC_FOCUSER, focuser_status)
