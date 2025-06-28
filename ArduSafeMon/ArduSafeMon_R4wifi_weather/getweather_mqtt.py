@@ -36,6 +36,23 @@ def publish_weather_data(mqtt_client, topic, data):
     mqtt_client.publish(topic, payload)
     print(f"Published to {topic}: {payload}")
 
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("Connected to MQTT broker.")
+    else:
+        print(f"Failed to connect, return code {rc}")
+
+def on_disconnect(client, userdata, rc):
+    print("Disconnected from MQTT broker. Will attempt to reconnect.")
+    while True:
+        try:
+            client.reconnect()
+            print("Reconnected to MQTT broker.")
+            break
+        except Exception as e:
+            print(f"Reconnect failed: {e}")
+            time.sleep(5)
+
 def periodic_weather_mqtt(api_key, city, mqtt_client, topic, interval=600):
     while True:
         weather_data = get_weather(api_key, city)
@@ -53,6 +70,8 @@ def main():
     mqtt_port = MQTT_PORT
 
     mqtt_client = mqtt.Client()
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_disconnect = on_disconnect
     mqtt_client.connect(mqtt_broker, mqtt_port, 60)
     mqtt_client.loop_start()
 
