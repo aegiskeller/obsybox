@@ -5,6 +5,7 @@ import asyncio
 from tapo import ApiClient
 import paho.mqtt.client as mqtt
 import time
+import json
 
 MQTT_BROKER = "192.168.1.49"  # Change to your MQTT broker address if needed
 MQTT_PORT = 1883
@@ -42,7 +43,7 @@ async def main():
     results = await asyncio.gather(*tasks)
     for payload in results:
         if payload is not None:
-            client.publish(MQTT_TOPIC, str(payload))
+            client.publish(MQTT_TOPIC, json.dumps(payload))
 
     client.disconnect()
 
