@@ -49,14 +49,20 @@ def get_mount_ra_dec():
     device_id = get_device_id("Telescope")
     if not device_id:
         print("No telescope selected.")
-        return None, None
+        return None, None, None
     scope = win32com.client.Dispatch(device_id)
     if not scope.Connected:
         scope.Connected = True
     ra = scope.RightAscension
     dec = scope.Declination
+    tracking = scope.Tracking if hasattr(scope, "Tracking") else None
+    # Collect additional status fields
+    at_park = scope.AtPark if hasattr(scope, "AtPark") else None
+    is_pulse_guiding = scope.IsPulseGuiding if hasattr(scope, "IsPulseGuiding") else None
+    slewing = scope.Slewing if hasattr(scope, "Slewing") else None
+    side_of_pier = scope.SideOfPier if hasattr(scope, "SideOfPier") else None
     scope.Connected = False
-    return ra, dec
+    return ra, dec, tracking, at_park, is_pulse_guiding, slewing, side_of_pier
 
 def get_camera_status():
     pythoncom.CoInitialize()
@@ -160,9 +166,17 @@ def publish(topic, payload, retries=3, delay=2):
     print(f"Failed to publish to {topic} after {retries} attempts.")
 
 if __name__ == "__main__":
-    ra, dec = get_mount_ra_dec()
+    ra, dec, tracking, at_park, is_pulse_guiding, slewing, side_of_pier = get_mount_ra_dec()
     if ra is not None and dec is not None:
-        publish(MQTT_TOPIC_MOUNT, {"ra": ra, "dec": dec})
+        publish(MQTT_TOPIC_MOUNT, {
+            "ra": ra,
+            "dec": dec,
+            "tracking": tracking,
+            "at_park": at_park,
+            "is_pulse_guiding": is_pulse_guiding,
+            "slewing": slewing,
+            "side_of_pier": side_of_pier
+        })
 
     camera_status = get_camera_status()
     publish(MQTT_TOPIC_CAMERA, camera_status)
