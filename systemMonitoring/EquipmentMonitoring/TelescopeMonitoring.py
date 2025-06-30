@@ -10,7 +10,7 @@ import time
 
 sys.path.append(r"C:\Program Files (x86)\Common Files\ASCOM\Platform")
 
-MQTT_BROKER = "localhost"
+MQTT_BROKER = "192.168.1.49"  # Replace with your MQTT broker address
 MQTT_PORT = 1883
 MQTT_TOPIC_MOUNT = "obsybox/telescope/status"
 MQTT_TOPIC_CAMERA = "obsybox/camera/status"
