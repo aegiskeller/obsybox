@@ -1,12 +1,10 @@
 #include <Wire.h>
-
 void setup() {
   Wire.begin();
   Serial.begin(9600);
   while (!Serial);
   Serial.println("\nI2C Scanner");
 }
-
 void loop() {
   byte error, address;
   int nDevices = 0;
@@ -20,7 +18,9 @@ void loop() {
       Serial.println(" !");
       nDevices++;
     }
-    Serial.println(address);
+    else {
+      Serial.println("nope")
+    }
   }
   if (nDevices == 0)
     Serial.println("No I2C devices found\n");

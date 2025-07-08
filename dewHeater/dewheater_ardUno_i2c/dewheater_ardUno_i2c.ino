@@ -3,7 +3,7 @@
 // the arduino sends the data to the lolin and then
 // the Lolin sends it to the iot Cloud
 #define MOSFETPIN 3 //n-channel- PWM capable
-#define THERMPIN A0  //10k thermistor and 10k resistor
+#define THERMPIN A1  //10k thermistor and 10k resistor
 
 #include "DHT.h"
 #include <string.h>
@@ -135,9 +135,9 @@ void loop()
   {
     pwmoutput = pwmoutputdefault;
   }
- // if (teletemp < 5) { // this is here while I sort out a more robust thermoresistor
-//    pwmoutput=250; // set the power to max
-//  }
+ if (teletemp < 5) { // this is here while I sort out a more robust thermoresistor
+   pwmoutput=255; // set the power to max
+ }
   analogWrite(MOSFETPIN, pwmoutput);
 
   pwmoutput = (pwmoutput * 39) / 100; //scale to %
