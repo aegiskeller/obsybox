@@ -372,7 +372,7 @@ bool medianSafe = false;
 
 void loop() {
   // Reset watchdog at start of loop
-  WDT.reset();
+  WDT.refresh();  // Changed from WDT.reset()
 
   // --- Non-blocking MQTT reconnect logic ---
   if (!mqttClient.connected()) {
@@ -403,7 +403,7 @@ void loop() {
     long sum = 0;
     for (int i = 0; i < NUM_SAMPLES; i++) sum += samples[i];
     averagedValue = sum / (float)NUM_SAMPLES;
-    WDT.reset(); // Reset watchdog after potentially long operation
+    WDT.refresh(); // Changed from WDT.reset()
   }
   
   // Weather data is now updated in lastWeatherJson by MQTT callback
@@ -474,7 +474,7 @@ void loop() {
   }
 
   // Reset watchdog before web server handling
-  WDT.reset();
+  WDT.refresh();  // Changed from WDT.reset()
   
   // --- Web server handling ---
   WiFiClient client = server.available();
@@ -532,5 +532,5 @@ void loop() {
   }
   
   // Reset watchdog at end of loop for safety
-  WDT.reset();
+  WDT.refresh();  // Changed from WDT.reset()
 }
