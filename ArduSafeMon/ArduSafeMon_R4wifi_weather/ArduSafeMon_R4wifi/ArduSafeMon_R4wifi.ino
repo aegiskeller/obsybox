@@ -4,7 +4,7 @@
 #include <WiFiClient.h>
 #include <EEPROM.h>
 #include <MQTT.h> // Add ArduinoMqttClient library
-#include <Adafruit_SleepyDog.h> // Add watchdog timer
+#include <WDT.h> // Add watchdog timer
 
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
@@ -87,7 +87,7 @@ void setup() {
   mqttClient.subscribe(mqtt_topic);
 
   // Initialize the watchdog timer (8 second timeout)
-  Watchdog.enable(8000);
+  WDT.begin(WDT_PERIOD_8000);
   Serial.println("Watchdog timer enabled (8s timeout)");
 }
 
@@ -372,7 +372,7 @@ bool medianSafe = false;
 
 void loop() {
   // Reset watchdog at start of loop
-  Watchdog.reset();
+  WDT.reset();
 
   // --- Non-blocking MQTT reconnect logic ---
   if (!mqttClient.connected()) {
@@ -403,7 +403,7 @@ void loop() {
     long sum = 0;
     for (int i = 0; i < NUM_SAMPLES; i++) sum += samples[i];
     averagedValue = sum / (float)NUM_SAMPLES;
-    Watchdog.reset(); // Reset watchdog after potentially long operation
+    WDT.reset(); // Reset watchdog after potentially long operation
   }
   
   // Weather data is now updated in lastWeatherJson by MQTT callback
@@ -473,8 +473,8 @@ void loop() {
     Serial.println(pubResult ? "OK" : "FAILED");
   }
 
-  // Reset watchdog before web server handling (can be time-consuming)
-  Watchdog.reset();
+  // Reset watchdog before web server handling
+  WDT.reset();
   
   // --- Web server handling ---
   WiFiClient client = server.available();
@@ -532,5 +532,5 @@ void loop() {
   }
   
   // Reset watchdog at end of loop for safety
-  Watchdog.reset();
+  WDT.reset();
 }
