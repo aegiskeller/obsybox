@@ -2,7 +2,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <FS.h> // Include the SPIFFS library
-#include <PubSubClient.h> 
+#include <PubSubClient.h>
+#include <Ticker.h>  // For ESP8266 watchdog
 
 // --- Add min/max values for plotting ---
 float tmin = 0, tmax = 40;      // Temperature range (°C)
@@ -45,6 +46,29 @@ unsigned long lastSampleTime = 0;
 float lastAvgTemperature = NAN;
 float lastAvgHumidity = NAN;
 float lastAvgAnemometer = NAN;
+
+// Non-blocking MQTT reconnect variables
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
+
+// Watchdog variables
+Ticker watchdogTicker;
+const int WATCHDOG_TIMEOUT = 30; // seconds
+unsigned long lastWatchdogReset = 0;
+bool watchdogEnabled = false;
+
+// Function to reset the device after watchdog timeout
+void resetModule() {
+  Serial.println("Watchdog timeout - resetting device!");
+  ESP.restart();
+}
+
+// Feed the watchdog to prevent reset
+void feedWatchdog() {
+  if (watchdogEnabled) {
+    lastWatchdogReset = millis();
+  }
+}
 
 void reconnectMQTT() {
   while (!mqttClient.connected()) {
@@ -211,12 +235,23 @@ void setup() {
   WiFi.begin(ssid, password);
 
   Serial.print("Connecting to WiFi");
+  unsigned long wifiStartTime = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStartTime > 60000) { // 1 minute timeout
+      Serial.println("\nWiFi connection timeout. Rebooting...");
+      ESP.restart();
+    }
     delay(500);
     Serial.print(".");
   }
   Serial.println("\nWiFi connected. IP address: ");
   Serial.println(WiFi.localIP());
+
+  // Enable watchdog timer (will reset after WATCHDOG_TIMEOUT seconds without feedWatchdog calls)
+  watchdogTicker.attach(WATCHDOG_TIMEOUT, resetModule);
+  watchdogEnabled = true;
+  lastWatchdogReset = millis();
+  Serial.println("Watchdog timer enabled");
 
   mqttClient.setServer(mqtt_server, mqtt_port); 
   server.on("/", handleRoot);
@@ -229,13 +264,29 @@ void setup() {
 }
 
 void loop() {
+  // Feed the watchdog to prevent reset
+  feedWatchdog();
+
   server.handleClient();
 
+  // Non-blocking MQTT reconnection
   if (!mqttClient.connected()) {
-    reconnectMQTT();
+    unsigned long now = millis();
+    if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
+      lastMqttReconnectAttempt = now;
+      Serial.print("Attempting MQTT connection...");
+      if (mqttClient.connect("Anemometer_ESP8266")) {
+        Serial.println("connected");
+      } else {
+        Serial.print("failed, rc=");
+        Serial.print(mqttClient.state());
+        Serial.println(" will try again in 5 seconds");
+      }
+    }
   }
   mqttClient.loop();
 
+  // Rest of the loop code is unchanged
   static unsigned long lastSampleTime = 0;
   static unsigned long sampleStartTime = 0;
   static int sampleCount = 0;

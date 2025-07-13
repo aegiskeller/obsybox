@@ -3,8 +3,41 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ESP8266WiFi.h>
+#include <PubSubClient.h> // Add this for MQTT support
 #include <math.h>
+#include <Ticker.h>
 #include "arduino_secrets.h"
+
+// MQTT settings
+const char* mqtt_server = "192.168.1.49"; // Replace with your MQTT broker IP
+const int mqtt_port = 1883;
+const char* mqtt_topic = "obsybox/dewheater";
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// Non-blocking MQTT reconnect variables
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
+
+// Watchdog variables
+Ticker watchdogTicker;
+const int WATCHDOG_TIMEOUT = 30; // seconds
+unsigned long lastWatchdogReset = 0;
+bool watchdogEnabled = false;
+
+// Function to reset the device after watchdog timeout
+void resetModule() {
+  Serial.println("Watchdog timeout - resetting device!");
+  ESP.restart();
+}
+
+// Feed the watchdog to prevent reset
+void feedWatchdog() {
+  if (watchdogEnabled) {
+    lastWatchdogReset = millis();
+  }
+}
 
 Adafruit_AHTX0 aht;
 
@@ -34,15 +67,21 @@ void setup()
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
 
-  if (!aht.begin()) 
-  {
+  // Try to initialize sensor, but don't block forever
+  if (!aht.begin()) {
     Serial.println("Could not find AHT10/AHT20 sensor! Check wiring.");
-    while (1) { yield(); }
+    delay(5000); // Pause briefly, then continue anyway
   }
 
+  // WiFi connection with timeout
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   Serial.print("Connecting to WiFi");
+  unsigned long wifiStartTime = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStartTime > 60000) { // 1 minute timeout
+      Serial.println("\nWiFi connection timeout. Rebooting...");
+      ESP.restart();
+    }
     delay(500);
     Serial.print(".");
   }
@@ -50,11 +89,23 @@ void setup()
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  // Setup MQTT
+  mqttClient.setServer(mqtt_server, mqtt_port);
+
   server.begin();
+  
+  // Enable watchdog timer (will reset after WATCHDOG_TIMEOUT seconds without feedWatchdog calls)
+  watchdogTicker.attach(WATCHDOG_TIMEOUT, resetModule);
+  watchdogEnabled = true;
+  lastWatchdogReset = millis();
+  Serial.println("Watchdog timer enabled");
 }
 
 void loop() 
 {
+  // Feed the watchdog to prevent reset
+  feedWatchdog();
+  
   static unsigned long lastPrint = 0;
   static float dsTemp = NAN;
   static float ahtTemp = NAN;
@@ -63,8 +114,25 @@ void loop()
 
   unsigned long now = millis();
 
-  // Update sensor values every 5 seconds
-  if (now - lastPrint >= 5000) {
+  // Non-blocking MQTT reconnection
+  if (!mqttClient.connected()) {
+    if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
+      lastMqttReconnectAttempt = now;
+      Serial.print("MQTT disconnected, attempting reconnect... ");
+      if (mqttClient.connect("DewHeater_ESP8266")) {
+        Serial.println("connected!");
+      } else {
+        Serial.print("failed, rc=");
+        Serial.print(mqttClient.state());
+        Serial.println(" will try again in 5 seconds");
+      }
+    }
+  } else {
+    mqttClient.loop();
+  }
+
+  // Update sensor values every 60 seconds
+  if (now - lastPrint >= 60000) {
     sensors.requestTemperatures();
     float temp = sensors.getTempCByIndex(0);
     unsigned long start = millis();
@@ -74,12 +142,40 @@ void loop()
     }
     dsTemp = temp;
 
+    // Try to read AHT10 but don't block if failed
     sensors_event_t humidityEvent, tempEvent;
-    aht.getEvent(&humidityEvent, &tempEvent);
-    ahtTemp = tempEvent.temperature;
-    ahtHumidity = humidityEvent.relative_humidity;
+    if (aht.getEvent(&humidityEvent, &tempEvent)) {
+      ahtTemp = tempEvent.temperature;
+      ahtHumidity = humidityEvent.relative_humidity;
+    }
 
     lastPrint = now;
+
+    // Publish to MQTT every 60 seconds (with sensor updates)
+    if (mqttClient.connected()) {
+      // Create JSON payload
+      char payload[256];
+      float dewPoint = calculateDewPoint(ahtTemp, ahtHumidity);
+      bool heaterIsOn = (heaterMode == "on") || (heaterMode == "auto" && dsTemp < (ahtTemp + tempOffset));
+      
+      snprintf(payload, sizeof(payload),
+        "{\"temperature\":%.2f,\"humidity\":%.2f,\"teltemp\":%.2f,\"dewpoint\":%.2f,\"heater\":\"%s\",\"offset\":%.2f}",
+        ahtTemp, ahtHumidity, dsTemp, dewPoint, 
+        heaterIsOn ? "on" : "off", tempOffset);
+      
+      mqttClient.publish(mqtt_topic, payload);
+      Serial.println("MQTT data published");
+    }
+  }
+
+  // Check WiFi connection and reconnect if needed
+  static unsigned long lastWifiCheck = 0;
+  if (now - lastWifiCheck > 30000) { // Check every 30 seconds
+    lastWifiCheck = now;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi connection lost, reconnecting...");
+      WiFi.reconnect();
+    }
   }
 
   // Relay logic: always respond to heaterMode
@@ -88,22 +184,30 @@ void loop()
   } else if (heaterMode == "off") {
     digitalWrite(RELAY_PIN, LOW);
   } else { // auto
-    if (dsTemp < (ahtTemp + tempOffset)) {
+    float dewPoint = calculateDewPoint(ahtTemp, ahtHumidity);
+    if (dsTemp < (dewPoint + tempOffset)) { // Compare to dew point with offset
       digitalWrite(RELAY_PIN, HIGH);
     } else {
       digitalWrite(RELAY_PIN, LOW);
     }
   }
 
-  // Serve web page
+  // Serve web page with non-blocking approach
   WiFiClient client = server.available();
   if (client) {
-    // Wait for request
-    while (client.connected() && !client.available()) { delay(1); }
+    // Limited wait for request (max 500ms)
+    unsigned long clientStartTime = millis();
+    while (client.connected() && !client.available() && millis() - clientStartTime < 500) { 
+      yield();  // Allow system tasks to run
+    }
+    
     String req = ""; // <-- Declare req here
-    while (client.available()) {
+    // Limited read time
+    clientStartTime = millis();
+    while (client.available() && millis() - clientStartTime < 1000) {
       char c = client.read();
       req += c;
+      yield();
     }
 
     // Parse offset from GET request
@@ -186,4 +290,6 @@ void loop()
     delay(1);
     client.stop();
   }
+  
+  feedWatchdog();  // Feed the watchdog at the end of the loop
 }

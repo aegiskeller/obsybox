@@ -4,6 +4,7 @@
 #include <WiFiClient.h>
 #include <EEPROM.h>
 #include <MQTT.h> // Add ArduinoMqttClient library
+#include <Adafruit_SleepyDog.h> // Add watchdog timer
 
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
@@ -84,6 +85,10 @@ void setup() {
   Serial.println("connected!");
 
   mqttClient.subscribe(mqtt_topic);
+
+  // Initialize the watchdog timer (8 second timeout)
+  Watchdog.enable(8000);
+  Serial.println("Watchdog timer enabled (8s timeout)");
 }
 
 // --- Add this function to parse user input from the web form ---
@@ -366,19 +371,28 @@ unsigned long lastSafetyUpdate = 0;
 bool medianSafe = false;
 
 void loop() {
-  // --- MQTT reconnect logic ---
+  // Reset watchdog at start of loop
+  Watchdog.reset();
+
+  // --- Non-blocking MQTT reconnect logic ---
   if (!mqttClient.connected()) {
-    Serial.println("MQTT disconnected, attempting reconnect...");
-    while (!mqttClient.connect("ArduSafeMon_R4wifi")) {
-      Serial.print(".");
-      delay(1000);
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastMqttReconnectAttempt > mqttReconnectInterval) {
+      lastMqttReconnectAttempt = currentMillis;
+      Serial.print("MQTT disconnected, attempting reconnect... ");
+      if (mqttClient.connect("ArduSafeMon_R4wifi")) {
+        Serial.println("connected!");
+        mqttClient.subscribe(mqtt_topic); // re-subscribe after reconnect
+      } else {
+        Serial.print("failed, rc=");
+        Serial.print(mqttClient.lastError());
+        Serial.println(" will try again in 5 seconds");
+      }
     }
-    Serial.println("MQTT reconnected!");
-    mqttClient.subscribe(mqtt_topic); // re-subscribe after reconnect
   }
 
   mqttClient.loop();
-
+  
   // Sample every 100ms for sensor averaging
   if (millis() - lastSampleTime >= 100) {
     lastSampleTime = millis();
@@ -389,8 +403,9 @@ void loop() {
     long sum = 0;
     for (int i = 0; i < NUM_SAMPLES; i++) sum += samples[i];
     averagedValue = sum / (float)NUM_SAMPLES;
+    Watchdog.reset(); // Reset watchdog after potentially long operation
   }
-
+  
   // Weather data is now updated in lastWeatherJson by MQTT callback
 
   // Parse weather values for safety check
@@ -458,7 +473,10 @@ void loop() {
     Serial.println(pubResult ? "OK" : "FAILED");
   }
 
-  // --- Web server and serial handling remain unchanged ---
+  // Reset watchdog before web server handling (can be time-consuming)
+  Watchdog.reset();
+  
+  // --- Web server handling ---
   WiFiClient client = server.available();
   if (client) {
     Serial.println("New client connected");
@@ -512,16 +530,7 @@ void loop() {
     client.stop();
     Serial.println("Client disconnected");
   }
-
-  // Serial handling (optional)
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('#');
-    if (cmd == "S") {
-      if (medianSafe) {
-        Serial.print("safe#");
-      } else {
-        Serial.print("notsafe#");
-      }
-    }
-  }
+  
+  // Reset watchdog at end of loop for safety
+  Watchdog.reset();
 }
