@@ -4,7 +4,7 @@
 #include <WiFiClient.h>
 #include <EEPROM.h>
 #include <MQTT.h> // Add ArduinoMqttClient library
-#include <WDT.h> // Add watchdog timer
+#include <WDT.h> // Make sure this is the correct library
 
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
@@ -87,8 +87,8 @@ void setup() {
   mqttClient.subscribe(mqtt_topic);
 
   // Initialize the watchdog timer (8 second timeout)
-  WDT.begin(WDT_TIMEOUT_8S);  // Use the correct constant for R4 WiFi
-  Serial.println("Watchdog timer enabled (8s timeout)");
+  WDT.begin(8000); // 8000ms = 8s
+  Serial.println("Watchdog timer enabled with 8000ms timeout");
 }
 
 // --- Add this function to parse user input from the web form ---
