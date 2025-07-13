@@ -87,7 +87,7 @@ void setup() {
   mqttClient.subscribe(mqtt_topic);
 
   // Initialize the watchdog timer (8 second timeout)
-  WDT.begin(WDT_PERIOD_8000);
+  WDT.begin(WDT_TIMEOUT_8S);  // Use the correct constant for R4 WiFi
   Serial.println("Watchdog timer enabled (8s timeout)");
 }
 
