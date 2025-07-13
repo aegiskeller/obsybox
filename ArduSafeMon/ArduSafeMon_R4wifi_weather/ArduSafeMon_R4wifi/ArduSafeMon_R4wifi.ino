@@ -370,9 +370,13 @@ unsigned long lastSafetySample = 0;
 unsigned long lastSafetyUpdate = 0;
 bool medianSafe = false;
 
+// Add with other global variables
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long mqttReconnectInterval = 5000; // 5 seconds between reconnect attempts
+
 void loop() {
   // Reset watchdog at start of loop
-  WDT.refresh();  // Changed from WDT.reset()
+  WDT.refresh();
 
   // --- Non-blocking MQTT reconnect logic ---
   if (!mqttClient.connected()) {
