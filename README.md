@@ -32,24 +32,24 @@ This appears to be an issue with a driver update that affects those cheap and ch
 look for the driver 3.4.2014.8 dated 08/08/20141
 
 ## ip configuration
-o 192.168.1.73 == dewheater
-o 192.168.1.99  == Rain Sensor and weather conditions from OpenWeatherMap (these are sourced from the MiniPC via a scheduler task getweather_mqtt)
-o 192.168.1.100 == NOT WORKING ArduSafeMon_R4wifi_weather/ArduSafeMon_R4wifi - Sky Condition Sensors - /lux, /sky, /ambient
-o 192.168.1.101 == Sky Condition Sensors - /lux, /sky, /ambient
-o 192.168.1.183 == Wombat Weather Station - /temperature, /humidity, /windspeed
-o 192.168.1.148 == CameraWebServer - ESP32cam; many endpts /capture
+- 192.168.1.73 == dewheater
+- 192.168.1.99  == Rain Sensor and weather conditions from OpenWeatherMap (these are sourced from the MiniPC via a scheduler task getweather_mqtt)
+- 192.168.1.100 == NOT WORKING ArduSafeMon_R4wifi_weather/ArduSafeMon_R4wifi - Sky Condition Sensors - /lux, /sky, /ambient
+- 192.168.1.101 == Sky Condition Sensors - /lux, /sky, /ambient
+- 192.168.1.183 == Wombat Weather Station - /temperature, /humidity, /windspeed
+- 192.168.1.148 == CameraWebServer - ESP32cam; many endpts /capture
 
 ## MQTT
 ### Setup
-o Go to Mosquitto Downloads and download the Windows installer.
-o Add Mosquitto to PATH:
+- Go to Mosquitto Downloads and download the Windows installer.
+- Add Mosquitto to PATH:
     Open System Properties > Advanced > Environment Variables.
     Under "System variables", find and select Path, then click Edit.
     Click New and add: C:\Program Files\mosquitto
-o Start the Broker:
+- Start the Broker:
     Open a Command Prompt.
     Run: mosquitto
-o The broker will start on port 1883
+- The broker will start on port 1883
 
 ### Test 
 Publish a message: mosquitto_pub -h localhost -t test/topic -m "Hello MQTT"
