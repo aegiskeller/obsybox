@@ -372,6 +372,9 @@ bool medianSafe = false;
 // Add with other global variables
 unsigned long lastMqttReconnectAttempt = 0;
 const unsigned long mqttReconnectInterval = 5000; // 5 seconds between reconnect attempts
+// Add these variables with your other globals
+unsigned long mqttFailedTime = 0;
+const unsigned long mqttResetTimeout = 180000; // 3 minutes in milliseconds
 
 void loop() {
   // Reset watchdog at start of loop
@@ -380,18 +383,38 @@ void loop() {
   // --- Non-blocking MQTT reconnect logic ---
   if (!mqttClient.connected()) {
     unsigned long currentMillis = millis();
+    
+    // If this is the first disconnect, record the time
+    if (mqttFailedTime == 0) {
+      mqttFailedTime = currentMillis;
+    }
+    // Check if we've been disconnected too long
+    else if (currentMillis - mqttFailedTime > mqttResetTimeout) {
+      Serial.println("MQTT disconnected for more than 3 minutes. Resetting device...");
+      delay(500); // Give serial time to send
+      ESP.restart(); // For ESP boards or
+      // Or use software reset for Arduino
+      // WDT.setup(WDT_OFF);
+      // asm volatile ("jmp 0"); // Force reset
+    }
+    
+    // Try reconnecting every 5 seconds
     if (currentMillis - lastMqttReconnectAttempt > mqttReconnectInterval) {
       lastMqttReconnectAttempt = currentMillis;
       Serial.print("MQTT disconnected, attempting reconnect... ");
       if (mqttClient.connect("ArduSafeMon_R4wifi")) {
         Serial.println("connected!");
         mqttClient.subscribe(mqtt_topic); // re-subscribe after reconnect
+        mqttFailedTime = 0; // Reset the failure timer on successful connection
       } else {
         Serial.print("failed, rc=");
         Serial.print(mqttClient.lastError());
         Serial.println(" will try again in 5 seconds");
       }
     }
+  } else {
+    // If connected, make sure failure timer is reset
+    mqttFailedTime = 0;
   }
 
   mqttClient.loop();
