@@ -392,10 +392,13 @@ void loop() {
     else if (currentMillis - mqttFailedTime > mqttResetTimeout) {
       Serial.println("MQTT disconnected for more than 3 minutes. Resetting device...");
       delay(500); // Give serial time to send
-      ESP.restart(); // For ESP boards or
-      // Or use software reset for Arduino
-      // WDT.setup(WDT_OFF);
-      // asm volatile ("jmp 0"); // Force reset
+      
+      // Force Arduino reset using watchdog
+      WDT.setup(0); // Set shortest timeout
+      while(1); // Wait for watchdog to reset
+      
+      // Alternative reset method for Arduino
+      // asm volatile ("jmp 0"); // Software reset
     }
     
     // Try reconnecting every 5 seconds
