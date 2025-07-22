@@ -394,7 +394,7 @@ void loop() {
       delay(500); // Give serial time to send
       
       // Force Arduino reset using watchdog
-      WDT.setup(0); // Set shortest timeout
+      WDT.begin(16); // Set shortest timeout (16ms)
       while(1); // Wait for watchdog to reset
       
       // Alternative reset method for Arduino
