@@ -7,9 +7,10 @@
 #include <math.h>
 #include <Ticker.h>
 #include "arduino_secrets.h"
+#include <ESP8266mDNS.h> // Add this at the top with your other includes
 
 // MQTT settings
-const char* mqtt_server = "192.168.1.49"; // Replace with your MQTT broker IP
+const char* mqtt_server = "192.168.1.49"; 
 const int mqtt_port = 1883;
 const char* mqtt_topic = "obsybox/dewheater";
 
@@ -35,7 +36,8 @@ void resetModule() {
 // Feed the watchdog to prevent reset
 void feedWatchdog() {
   if (watchdogEnabled) {
-    lastWatchdogReset = millis();
+    watchdogTicker.detach(); // Stop the current timer
+    watchdogTicker.attach(WATCHDOG_TIMEOUT, resetModule); // Start a new timer
   }
 }
 
@@ -73,7 +75,13 @@ void setup()
     delay(5000); // Pause briefly, then continue anyway
   }
 
-  // WiFi connection with timeout
+  // Set static IP address and mDNS hostname
+  IPAddress local_IP(192, 168, 1, 73);
+  IPAddress gateway(192, 168, 1, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  //IPAddress dns(8, 8, 8, 8);
+  WiFi.config(local_IP, gateway, subnet); //, dns);
+
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   Serial.print("Connecting to WiFi");
   unsigned long wifiStartTime = millis();
@@ -89,6 +97,13 @@ void setup()
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  // Set up mDNS responder for dewheater.local
+  if (MDNS.begin("dewheater")) {
+    Serial.println("mDNS responder started: dewheater.local");
+  } else {
+    Serial.println("Error setting up mDNS responder!");
+  }
+
   // Setup MQTT
   mqttClient.setServer(mqtt_server, mqtt_port);
 
@@ -103,10 +118,10 @@ void setup()
 
 void loop() 
 {
-  // Feed the watchdog to prevent reset
-  feedWatchdog();
-  
+  feedWatchdog(); // Feed at start of every loop
+
   static unsigned long lastPrint = 0;
+  static unsigned long lastHeartbeat = 0;
   static float dsTemp = NAN;
   static float ahtTemp = NAN;
   static float ahtHumidity = NAN;
@@ -126,23 +141,25 @@ void loop()
         Serial.print(mqttClient.state());
         Serial.println(" will try again in 5 seconds");
       }
+      feedWatchdog(); // Feed after reconnect attempt
     }
   } else {
     mqttClient.loop();
+    feedWatchdog(); // Feed after MQTT loop
   }
 
-  // Update sensor values every 60 seconds
-  if (now - lastPrint >= 60000) {
+  // Update sensor values every 10 seconds
+  if (now - lastPrint >= 10000) {
     sensors.requestTemperatures();
     float temp = sensors.getTempCByIndex(0);
     unsigned long start = millis();
     while (temp <= -127.0 && millis() - start < 500) {
         yield();
         temp = sensors.getTempCByIndex(0);
+        feedWatchdog(); // Feed during long sensor read
     }
     dsTemp = temp;
 
-    // Try to read AHT10 but don't block if failed
     sensors_event_t humidityEvent, tempEvent;
     if (aht.getEvent(&humidityEvent, &tempEvent)) {
       ahtTemp = tempEvent.temperature;
@@ -151,30 +168,49 @@ void loop()
 
     lastPrint = now;
 
-    // Publish to MQTT every 60 seconds (with sensor updates)
+    // Publish to MQTT every 10 seconds (with sensor updates)
     if (mqttClient.connected()) {
-      // Create JSON payload
       char payload[256];
       float dewPoint = calculateDewPoint(ahtTemp, ahtHumidity);
-      bool heaterIsOn = (heaterMode == "on") || (heaterMode == "auto" && dsTemp < (ahtTemp + tempOffset));
-      
+      int relayState = digitalRead(RELAY_PIN);
       snprintf(payload, sizeof(payload),
         "{\"temperature\":%.2f,\"humidity\":%.2f,\"teltemp\":%.2f,\"dewpoint\":%.2f,\"heater\":\"%s\",\"offset\":%.2f}",
         ahtTemp, ahtHumidity, dsTemp, dewPoint, 
-        heaterIsOn ? "on" : "off", tempOffset);
-      
+        relayState == HIGH ? "on" : "off", tempOffset);
       mqttClient.publish(mqtt_topic, payload);
       Serial.println("MQTT data published");
+      feedWatchdog(); // Feed after MQTT publish
     }
+  }
+
+  // Heartbeat message every 5 seconds
+  if (now - lastHeartbeat >= 5000) {
+    float dewPoint = calculateDewPoint(ahtTemp, ahtHumidity);
+    bool heaterIsOn = (heaterMode == "on") || (heaterMode == "auto" && dsTemp < (ahtTemp + tempOffset));
+    Serial.print("[HEARTBEAT] Ambient Temp: ");
+    Serial.print(ahtTemp, 2);
+    Serial.print(" C, Humidity: ");
+    Serial.print(ahtHumidity, 2);
+    Serial.print(" %, Telescope Temp: ");
+    Serial.print(dsTemp, 2);
+    Serial.print(" C, Dew Point: ");
+    Serial.print(dewPoint, 2);
+    Serial.print(" C, Heater: ");
+    Serial.print(heaterIsOn ? "ON" : "OFF");
+    Serial.print(", Offset: ");
+    Serial.println(tempOffset, 2);
+    lastHeartbeat = now;
+    feedWatchdog(); // Feed after heartbeat
   }
 
   // Check WiFi connection and reconnect if needed
   static unsigned long lastWifiCheck = 0;
-  if (now - lastWifiCheck > 30000) { // Check every 30 seconds
+  if (now - lastWifiCheck > 30000) {
     lastWifiCheck = now;
     if (WiFi.status() != WL_CONNECTED) {
       Serial.println("WiFi connection lost, reconnecting...");
       WiFi.reconnect();
+      feedWatchdog(); // Feed after WiFi reconnect
     }
   }
 
@@ -183,9 +219,9 @@ void loop()
     digitalWrite(RELAY_PIN, HIGH);
   } else if (heaterMode == "off") {
     digitalWrite(RELAY_PIN, LOW);
-  } else { // auto
+  } else { // "auto"
     float dewPoint = calculateDewPoint(ahtTemp, ahtHumidity);
-    if (dsTemp < (dewPoint + tempOffset)) { // Compare to dew point with offset
+    if (dsTemp < (dewPoint + tempOffset)) {
       digitalWrite(RELAY_PIN, HIGH);
     } else {
       digitalWrite(RELAY_PIN, LOW);
@@ -195,19 +231,18 @@ void loop()
   // Serve web page with non-blocking approach
   WiFiClient client = server.available();
   if (client) {
-    // Limited wait for request (max 500ms)
     unsigned long clientStartTime = millis();
     while (client.connected() && !client.available() && millis() - clientStartTime < 500) { 
-      yield();  // Allow system tasks to run
+      yield();
+      feedWatchdog(); // Feed during client wait
     }
-    
-    String req = ""; // <-- Declare req here
-    // Limited read time
+    String req = "";
     clientStartTime = millis();
     while (client.available() && millis() - clientStartTime < 1000) {
       char c = client.read();
       req += c;
       yield();
+      feedWatchdog(); // Feed during client read
     }
 
     // Parse offset from GET request
@@ -216,8 +251,8 @@ void loop()
       int endIdx = req.indexOf('&', idx);
       String val = (endIdx == -1) ? req.substring(idx + 7) : req.substring(idx + 7, endIdx);
       tempOffset = val.toFloat();
-      if (tempOffset < -10) tempOffset = -10;
-      if (tempOffset > 10) tempOffset = 10;
+      if (tempOffset < 0) tempOffset = 0;
+      if (tempOffset > 20) tempOffset = 20;
     }
 
     // Parse heater mode from GET request
@@ -262,14 +297,18 @@ void loop()
     client.print("<div class='reading'>Temperature Offset: <span class='value' id='offsetval'>");
     client.print(tempOffset, 2);
     client.println(" &deg;C</span></div>");
-    client.print("<div class='reading'>Heater: <span class='value' style='color:");
-    client.print((heaterMode == "on") || (heaterMode == "auto" && dsTemp < (ahtTemp + tempOffset)) ? "#0f0" : "#f44");
+
+    // Show heater relay status based on actual RELAY_PIN state
+    int relayState = digitalRead(RELAY_PIN);
+    client.print("<div class='reading'>Heater Relay: <span class='value' style='color:");
+    client.print(relayState == HIGH ? "#0f0" : "#f44");
     client.print(";'>");
-    client.print((heaterMode == "on") || (heaterMode == "auto" && dsTemp < (ahtTemp + tempOffset)) ? "ON" : "OFF");
+    client.print(relayState == HIGH ? "ON" : "OFF");
     client.println("</span></div>");
+
     client.println("<form method='GET'>");
     client.println("<label for='offset'>Set Temperature Offset (from Dewpoint):</label>");
-    client.print("<input type='range' min='-10' max='10' step='0.1' name='offset' id='offset' value='");
+    client.print("<input type='range' min='0' max='20' step='0.1' name='offset' id='offset' value='");
     client.print(tempOffset, 2);
     client.println("' oninput='offsetval.innerText=this.value'><br><br>");
     client.println("<label for='heater'>Heater Control:</label>");
@@ -289,7 +328,8 @@ void loop()
     client.println("</div></body></html>");
     delay(1);
     client.stop();
+    feedWatchdog(); // Feed after serving client
   }
-  
-  feedWatchdog();  // Feed the watchdog at the end of the loop
+
+  feedWatchdog(); // Feed at end of loop for safety
 }

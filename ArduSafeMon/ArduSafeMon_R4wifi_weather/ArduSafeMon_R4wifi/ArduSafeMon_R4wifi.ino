@@ -31,7 +31,6 @@ const char* mqtt_topic = "obsybox/weather";
 WiFiClient net;
 MQTTClient mqttClient(1024); // Buffer size for large JSON
 
-// --- Add these global variables at the top ---
 float maxClouds = 100;
 float maxWind = 100;
 float maxHumidity = 100;
@@ -53,9 +52,9 @@ void setup() {
   IPAddress local_IP(192, 168, 1, 99);
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
-  IPAddress dns(8, 8, 8, 8);
+  //IPAddress dns(8, 8, 8, 8);
 
-  WiFi.config(local_IP, gateway, subnet, dns);
+  WiFi.config(local_IP, gateway, subnet); //, dns);
 
   WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
@@ -413,7 +412,7 @@ void loop() {
   // Weather data is now updated in lastWeatherJson by MQTT callback
 
   // Parse weather values for safety check
-  float cloudsVal = -1, windVal = -1, humidityVal = -1;
+  float cloudsVal = 0, windVal = 0, humidityVal = 0;
   if (lastWeatherJson.length() > 0) {
     int hIdx = lastWeatherJson.indexOf("\"humidity\":");
     if (hIdx > 0) {
@@ -442,9 +441,18 @@ void loop() {
     lastSafetySample = millis();
 
     bool isSafe = averagedValue < safeState;
-    if ((cloudsVal >= 0 && cloudsVal > maxClouds)) isSafe = false;
-    if ((windVal >= 0 && windVal > maxWind)) isSafe = false;
-    if ((humidityVal >= 0 && humidityVal > maxHumidity)) isSafe = false;
+    if ((cloudsVal >= 0 && cloudsVal > maxClouds)) {
+      isSafe = false;
+      Serial.println("Clouds too high, not safe");
+    }
+    if ((windVal >= 0 && windVal > maxWind)) {
+      isSafe = false;
+      Serial.println("Wind too high, not safe");
+    }
+    if ((humidityVal >= 0 && humidityVal > maxHumidity)) {
+      isSafe = false;
+      Serial.println("Humidity too high, not safe");
+    }
 
     safetyHistory[safetyHistoryIdx] = isSafe;
     safetyHistoryIdx = (safetyHistoryIdx + 1) % SAFETY_HISTORY_LEN;
@@ -471,10 +479,10 @@ void loop() {
     payload += medianSafe ? "true" : "false";
     payload += ",\"reason\":\"" + reason + "\"}";
     bool pubResult = mqttClient.publish("obsybox/weathersafety", payload);
-    Serial.print("Publishing to obsybox/weathersafety: ");
-    Serial.println(payload);
-    Serial.print("Publish result: ");
-    Serial.println(pubResult ? "OK" : "FAILED");
+    // Serial.print("Publishing to obsybox/weathersafety: ");
+    // Serial.println(payload);
+    // Serial.print("Publish result: ");
+    // Serial.println(pubResult ? "OK" : "FAILED");
   }
 
   // Reset watchdog before web server handling
@@ -483,7 +491,7 @@ void loop() {
   // --- Web server handling ---
   WiFiClient client = server.available();
   if (client) {
-    Serial.println("New client connected");
+    //Serial.println("New client connected");
     String req = "";
     unsigned long timeout = millis() + 1000;
     while (client.connected() && millis() < timeout) {
@@ -493,8 +501,8 @@ void loop() {
         if (req.endsWith("\r\n\r\n")) break;
       }
     }
-    Serial.print("Request: ");
-    Serial.println(req);
+    // Serial.print("Request: ");
+    // Serial.println(req);
 
     // Handle settings update from GET parameters
     if (req.indexOf("GET /?") >= 0) {
@@ -532,9 +540,21 @@ void loop() {
     }
     delay(1);
     client.stop();
-    Serial.println("Client disconnected");
+    //Serial.println("Client disconnected");
   }
   
   // Reset watchdog at end of loop for safety
-  WDT.refresh();  // Changed from WDT.reset()
+  WDT.refresh();  
+
+  // Check for "S#" command via serial and report safety state
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('#');
+    if (cmd == "S") {
+      if (medianSafe) {
+        Serial.print("safe#");
+      } else {
+        Serial.print("notsafe#");
+      }
+    }
+  }
 }

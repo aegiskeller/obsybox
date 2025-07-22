@@ -44,7 +44,7 @@ const char *password = SECRET_PASS;
 IPAddress local_IP(192, 168, 1, 148);
 // Set your Gateway IP address
 IPAddress gateway(192, 168, 1, 1);
-IPAddress subnet(255, 255, 0, 0);
+IPAddress subnet(255, 255, 255, 0);
 
 void startCameraServer();
 void setupLedFlash(int pin);

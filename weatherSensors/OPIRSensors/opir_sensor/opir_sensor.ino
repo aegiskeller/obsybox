@@ -51,8 +51,8 @@ void setup() {
   IPAddress local_IP(192, 168, 1, 101);
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
-  IPAddress dns(8, 8, 8, 8);
-  WiFi.config(local_IP, dns, gateway, subnet);
+  //IPAddress dns(8, 8, 8, 8);
+  WiFi.config(local_IP, gateway, subnet);
 
   // WiFi connection with watchdog resets
   WiFi.begin(ssid, password);
