@@ -1,77 +1,81 @@
-import time
+# Test for LHM
+# reach out to the LHM server and get CPU temperature data
 import json
-import paho.mqtt.client as mqtt
 import requests
-import socket
+import paho.mqtt.client as mqtt
 
-MQTT_BROKER = "192.168.1.49"
-MQTT_TOPIC = "obsybox/system_monitoring"
-INTERVAL = 60  # seconds
+client = mqtt.Client()
+client.connect('192.168.1.49', 1883, 60)
+
 LHM_SERVER_URL = "http://localhost:8085/data.json"
+response = requests.get(LHM_SERVER_URL)
+cpu_temp = None
 
-def get_cpu_temp():
-    try:
-        response = requests.get(LHM_SERVER_URL, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            # Try to find CPU temperature as before
-            for hardware in data.get("Children", []):
-                if hardware.get("Text", "").lower().startswith("cpu"):
-                    for sensor_group in hardware.get("Children", []):
-                        if "temperature" in sensor_group.get("Text", "").lower():
-                            for sensor in sensor_group.get("Children", []):
-                                sensor_text = sensor.get("Text", "")
-                                if any(keyword in sensor_text.lower() for keyword in ["package", "average"]):
-                                    temp_value = sensor.get("Value", "")
-                                    if temp_value and "°C" in temp_value:
-                                        try:
-                                            temp = float(temp_value.replace("°C", "").strip())
-                                            return round(temp, 1)
-                                        except ValueError:
-                                            continue
-            # Fallback: get the first CPU temperature found
-            for hardware in data.get("Children", []):
-                if hardware.get("Text", "").lower().startswith("cpu"):
-                    for sensor_group in hardware.get("Children", []):
-                        if "temperature" in sensor_group.get("Text", "").lower():
-                            for sensor in sensor_group.get("Children", []):
-                                temp_value = sensor.get("Value", "")
-                                if temp_value and "°C" in temp_value:
-                                    try:
-                                        temp = float(temp_value.replace("°C", "").strip())
-                                        return round(temp, 1)
-                                    except ValueError:
-                                        continue
-            # If no CPU temperature found, print all available temperature sensors for debugging
-            print("No CPU temperature found. Available temperature sensors:")
-            for hardware in data.get("Children", []):
-                hw_name = hardware.get("Text", "")
-                for sensor_group in hardware.get("Children", []):
-                    if "temperature" in sensor_group.get("Text", "").lower():
-                        for sensor in sensor_group.get("Children", []):
-                            sensor_name = sensor.get("Text", "")
-                            sensor_value = sensor.get("Value", "")
-                            print(f"{hw_name} > {sensor_name}: {sensor_value}")
-    except Exception as e:
-        print(f"Error getting CPU temperature: {e}")
+def find_sensor_value(node, target_path, value_type=None):
+    """
+    Recursively search for a sensor value by path.
+    target_path: list of strings representing the hierarchy, e.g. ["KINGSTON SA400S37480G", "Load", "Used Space"]
+    value_type: 'percent', 'celsius', 'kbps', etc. (optional, for parsing)
+    """
+    if isinstance(node, dict):
+        if len(target_path) == 1 and node.get("Text", "") == target_path[0]:
+            value = node.get("Value", "")
+            if value:
+                if value_type == 'percent' and '%' in value:
+                    try:
+                        return float(value.replace('%', '').strip())
+                    except ValueError:
+                        return None
+                elif value_type == 'celsius' and '°C' in value:
+                    try:
+                        return float(value.replace('°C', '').strip())
+                    except ValueError:
+                        return None
+                elif value_type == 'kbps' and 'KB/s' in value:
+                    try:
+                        return float(value.replace('KB/s', '').strip())
+                    except ValueError:
+                        return None
+                else:
+                    return value
+        elif node.get("Text", "") == target_path[0]:
+            for child in node.get("Children", []):
+                result = find_sensor_value(child, target_path[1:], value_type)
+                if result is not None:
+                    return result
+        else:
+            for child in node.get("Children", []):
+                result = find_sensor_value(child, target_path, value_type)
+                if result is not None:
+                    return result
+    elif isinstance(node, list):
+        for item in node:
+            result = find_sensor_value(item, target_path, value_type)
+            if result is not None:
+                return result
     return None
 
-def main():
-    client = mqtt.Client()
-    client.connect(MQTT_BROKER, 1883, 60)
-    client.loop_start()
-    while True:
-        cpu_temp = get_cpu_temp()
-        payload = {
-            "cpu_temp": cpu_temp,
-            "hostname": socket.gethostname()
-        }
-        if client.is_connected():
-            client.publish(MQTT_TOPIC, json.dumps(payload), qos=1)
-            print("Published:", payload)
-        else:
-            print("MQTT not connected, skipping publish.")
-        time.sleep(INTERVAL)
+if response.status_code == 200:
+    data = response.json()
+    cpu_temp = find_sensor_value(data, ["CPU Package"], value_type='celsius')
+    ssd_used_space = find_sensor_value(data, ["KINGSTON SA400S37480G", "Load", "Used Space"], value_type='percent')
+    wifi_util = find_sensor_value(data, ["Wi-Fi", "Load", "Network Utilization"], value_type='percent')
+    wifi_upload = find_sensor_value(data, ["Wi-Fi", "Throughput", "Upload Speed"], value_type='kbps')
 
-if __name__ == "__main__":
-    main()
+    payload = {}
+    if cpu_temp is not None:
+        payload["cpu_temp"] = cpu_temp
+    if ssd_used_space is not None:
+        payload["ssd_used_space"] = ssd_used_space
+    if wifi_util is not None:
+        payload["wifi_utilization"] = wifi_util
+    if wifi_upload is not None:
+        payload["wifi_upload_kbps"] = wifi_upload
+
+    if payload:
+        client.publish("obsybox/system_monitoring/piglet", json.dumps(payload), qos=1)
+        print(f"Published payload: {payload}")
+    else:
+        print("No relevant sensor data found in LHM data.")
+else:
+    print(f"Failed to retrieve LHM data: {response.status_code}")
