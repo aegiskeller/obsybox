@@ -55,27 +55,32 @@ def find_sensor_value(node, target_path, value_type=None):
                 return result
     return None
 
-if response.status_code == 200:
-    data = response.json()
-    cpu_temp = find_sensor_value(data, ["CPU Package"], value_type='celsius')
-    ssd_used_space = find_sensor_value(data, ["KINGSTON SA400S37480G", "Load", "Used Space"], value_type='percent')
-    wifi_util = find_sensor_value(data, ["Wi-Fi", "Load", "Network Utilization"], value_type='percent')
-    wifi_upload = find_sensor_value(data, ["Wi-Fi", "Throughput", "Upload Speed"], value_type='kbps')
+import time
 
-    payload = {}
-    if cpu_temp is not None:
-        payload["cpu_temp"] = cpu_temp
-    if ssd_used_space is not None:
-        payload["ssd_used_space"] = ssd_used_space
-    if wifi_util is not None:
-        payload["wifi_utilization"] = wifi_util
-    if wifi_upload is not None:
-        payload["wifi_upload_kbps"] = wifi_upload
+while True:
+    response = requests.get(LHM_SERVER_URL)
+    if response.status_code == 200:
+        data = response.json()
+        cpu_temp = find_sensor_value(data, ["CPU Package"], value_type='celsius')
+        ssd_used_space = find_sensor_value(data, ["KINGSTON SA400S37480G", "Load", "Used Space"], value_type='percent')
+        wifi_util = find_sensor_value(data, ["Wi-Fi", "Load", "Network Utilization"], value_type='percent')
+        wifi_upload = find_sensor_value(data, ["Wi-Fi", "Throughput", "Upload Speed"], value_type='kbps')
 
-    if payload:
-        client.publish("obsybox/system_monitoring/piglet", json.dumps(payload), qos=1)
-        print(f"Published payload: {payload}")
+        payload = {}
+        if cpu_temp is not None:
+            payload["cpu_temp"] = cpu_temp
+        if ssd_used_space is not None:
+            payload["ssd_used_space"] = ssd_used_space
+        if wifi_util is not None:
+            payload["wifi_utilization"] = wifi_util
+        if wifi_upload is not None:
+            payload["wifi_upload_kbps"] = wifi_upload
+
+        if payload:
+            client.publish("obsybox/system_monitoring/piglet", json.dumps(payload), qos=1)
+            print(f"Published payload: {payload}")
+        else:
+            print("No relevant sensor data found in LHM data.")
     else:
-        print("No relevant sensor data found in LHM data.")
-else:
-    print(f"Failed to retrieve LHM data: {response.status_code}")
+        print(f"Failed to retrieve LHM data: {response.status_code}")
+    time.sleep(30)
