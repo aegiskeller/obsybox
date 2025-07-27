@@ -1,90 +1,86 @@
-import psutil
-import time
+# Test for LHM
+# reach out to the LHM server and get CPU temperature data
 import json
-import socket
+import requests
 import paho.mqtt.client as mqtt
-import subprocess
 
-try:
-    import wmi
-    w = wmi.WMI(namespace="root\\wmi")
-except ImportError:
-    w = None
+client = mqtt.Client()
+client.connect('192.168.1.49', 1883, 60)
 
-MQTT_BROKER = "192.168.1.49"
-MQTT_TOPIC = "obsybox/system_monitoring"
-INTERVAL = 60  # seconds
+LHM_SERVER_URL = "http://localhost:8085/data.json"
+response = requests.get(LHM_SERVER_URL)
+cpu_temp = None
 
-def get_cpu_temp():
-    if w:
-        try:
-            temperature_info = w.MSAcpi_ThermalZoneTemperature()[0]
-            # Convert from tenths of Kelvin to Celsius
-            temp_c = float(temperature_info.CurrentTemperature) / 10.0 - 273.15
-            return round(temp_c, 1)
-        except Exception:
-            return None
+def find_sensor_value(node, target_path, value_type=None):
+    """
+    Recursively search for a sensor value by path.
+    target_path: list of strings representing the hierarchy, e.g. ["KINGSTON SA400S37480G", "Load", "Used Space"]
+    value_type: 'percent', 'celsius', 'kbps', etc. (optional, for parsing)
+    """
+    if isinstance(node, dict):
+        if len(target_path) == 1 and node.get("Text", "") == target_path[0]:
+            value = node.get("Value", "")
+            if value:
+                if value_type == 'percent' and '%' in value:
+                    try:
+                        return float(value.replace('%', '').strip())
+                    except ValueError:
+                        return None
+                elif value_type == 'celsius' and '°C' in value:
+                    try:
+                        return float(value.replace('°C', '').strip())
+                    except ValueError:
+                        return None
+                elif value_type == 'kbps' and 'KB/s' in value:
+                    try:
+                        return float(value.replace('KB/s', '').strip())
+                    except ValueError:
+                        return None
+                else:
+                    return value
+        elif node.get("Text", "") == target_path[0]:
+            for child in node.get("Children", []):
+                result = find_sensor_value(child, target_path[1:], value_type)
+                if result is not None:
+                    return result
+        else:
+            for child in node.get("Children", []):
+                result = find_sensor_value(child, target_path, value_type)
+                if result is not None:
+                    return result
+    elif isinstance(node, list):
+        for item in node:
+            result = find_sensor_value(item, target_path, value_type)
+            if result is not None:
+                return result
     return None
 
-def get_wifi_strength():
-    try:
-        output = subprocess.check_output(['netsh', 'wlan', 'show', 'interfaces'], encoding='utf-8')
-        for line in output.split('\n'):
-            if 'Signal' in line:
-                # Example line: '    Signal                   : 88%'
-                return int(line.split(':')[1].strip().replace('%',''))
-    except Exception:
-        return None
+import time
 
-def safe_value(val):
-    return 0.0 if val is None else val
+while True:
+    response = requests.get(LHM_SERVER_URL)
+    if response.status_code == 200:
+        data = response.json()
+        cpu_temp = find_sensor_value(data, ["CPU Package"], value_type='celsius')
+        ssd_used_space = find_sensor_value(data, ["KINGSTON SA400S37480G", "Load", "Used Space"], value_type='percent')
+        wifi_util = find_sensor_value(data, ["Wi-Fi", "Load", "Network Utilization"], value_type='percent')
+        wifi_upload = find_sensor_value(data, ["Wi-Fi", "Throughput", "Upload Speed"], value_type='kbps')
 
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("Connected to MQTT broker.")
-    else:
-        print(f"Failed to connect to MQTT broker, rc={rc}")
+        payload = {}
+        if cpu_temp is not None:
+            payload["cpu_temp"] = cpu_temp
+        if ssd_used_space is not None:
+            payload["ssd_used_space"] = ssd_used_space
+        if wifi_util is not None:
+            payload["wifi_utilization"] = wifi_util
+        if wifi_upload is not None:
+            payload["wifi_upload_kbps"] = wifi_upload
 
-def on_disconnect(client, userdata, rc):
-    print("Disconnected from MQTT broker. Will attempt to reconnect...")
-    while True:
-        try:
-            client.reconnect()
-            print("Reconnected to MQTT broker.")
-            break
-        except Exception as e:
-            print(f"Reconnect failed: {e}")
-            time.sleep(5)
-
-def main():
-    client = mqtt.Client()
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.connect(MQTT_BROKER, 1883, 60)
-    client.loop_start()
-
-    while True:
-        cpu_temp = safe_value(get_cpu_temp())
-        cpu_load = safe_value(psutil.cpu_percent(interval=1))
-        disk = psutil.disk_usage('C:\\')
-        disk_free_gb = safe_value(round(disk.free / (1024 ** 3), 2))
-        wifi_strength = safe_value(get_wifi_strength())
-
-        payload = {
-            "cpu_temp": cpu_temp,
-            "cpu_load": cpu_load,
-            "disk_free_gb": disk_free_gb,
-            "hostname": socket.gethostname(),
-            "wifi_strength": wifi_strength
-        }
-
-        if client.is_connected():
-            client.publish(MQTT_TOPIC, json.dumps(payload), qos=1)
-            print("Published:", payload)
+        if payload:
+            client.publish("obsybox/system_monitoring/piglet", json.dumps(payload), qos=1)
+            print(f"Published payload: {payload}")
         else:
-            print("MQTT not connected, skipping publish.")
-
-        time.sleep(INTERVAL)
-
-if __name__ == "__main__":
-    main()
+            print("No relevant sensor data found in LHM data.")
+    else:
+        print(f"Failed to retrieve LHM data: {response.status_code}")
+    time.sleep(30)
