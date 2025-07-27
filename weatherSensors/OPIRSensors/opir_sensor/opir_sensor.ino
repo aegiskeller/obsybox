@@ -45,7 +45,7 @@ void setup() {
   Wire.begin();
 
   // Enable watchdog first thing
-  Watchdog.enable(15000); // 15 seconds timeout
+  Watchdog.enable(30000); // 30 seconds timeout
 
   // Static IP configuration 
   IPAddress local_IP(192, 168, 1, 101);
