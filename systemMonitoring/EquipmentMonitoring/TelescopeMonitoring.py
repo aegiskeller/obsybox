@@ -1,191 +1,324 @@
-import sys
+import requests
 import json
-import pythoncom
-import win32com.client
-import paho.mqtt.client as mqtt
-import os
 import time
+from datetime import datetime
+import paho.mqtt.client as mqtt
 
-### to be run on the mini-pc
+# NINA API settings
+NINA_API_URL = "http://192.168.1.8:1888"
+NINA_API_ENDPOINT_CAMERA = "/v2/api/equipment/camera/info"
+NINA_API_ENDPOINT_STATUS = "/v2/api/version"
+NINA_API_ENDPOINT_FOCUSER = "/v2/api/equipment/focuser/info"  # Added focuser endpoint
+NINA_API_ENDPOINT_MOUNT = "/v2/api/equipment/telescope/info"  # Added mount endpoint
+NINA_API_ENDPOINT_DOME = "/v2/api/equipment/dome/info"
+NINA_API_ENDPOINT_FILTERWHEEL = "/v2/api/equipment/filterwheel/info"
+NINA_API_ENDPOINT_GUIDER = "/v2/api/equipment/guider/info"  # Added guider endpoint
 
-sys.path.append(r"C:\Program Files (x86)\Common Files\ASCOM\Platform")
-
+# MQTT settings
 MQTT_BROKER = "192.168.1.49"  # Replace with your MQTT broker address
 MQTT_PORT = 1883
-MQTT_TOPIC_MOUNT = "obsybox/telescope/status"
-MQTT_TOPIC_CAMERA = "obsybox/camera/status"
-MQTT_TOPIC_DOME = "obsybox/dome/status"
-MQTT_TOPIC_FILTERWHEEL = "obsybox/filterwheel/status"
-MQTT_TOPIC_FOCUSER = "obsybox/focuser/status"
+MQTT_TOPIC = "obsybox/equipment"
+MQTT_CLIENT_ID = "nina-monitor"
 
-DEVICE_ID_FILE = "ascom_device_ids.json"
+def get_timestamp():
+    """Return current timestamp in a readable format."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def load_device_ids():
-    if os.path.exists(DEVICE_ID_FILE):
-        with open(DEVICE_ID_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_device_ids(ids):
-    with open(DEVICE_ID_FILE, "w") as f:
-        json.dump(ids, f)
-
-def get_device_id(device_type, chooser_key=None):
-    ids = load_device_ids()
-    key = chooser_key if chooser_key else device_type
-    if key in ids:
-        return ids[key]
-    pythoncom.CoInitialize()
-    chooser = win32com.client.Dispatch("ASCOM.Utilities.Chooser")
-    chooser.DeviceType = device_type
-    device_id = chooser.Choose(None)
-    if device_id:
-        ids[key] = device_id
-        save_device_ids(ids)
-    return device_id
-
-def get_mount_ra_dec():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Telescope")
-    if not device_id:
-        print("No telescope selected.")
-        return None, None, None
-    scope = win32com.client.Dispatch(device_id)
-    if not scope.Connected:
-        scope.Connected = True
-    ra = scope.RightAscension
-    dec = scope.Declination
-    tracking = scope.Tracking if hasattr(scope, "Tracking") else None
-    # Collect additional status fields
-    at_park = scope.AtPark if hasattr(scope, "AtPark") else None
-    is_pulse_guiding = scope.IsPulseGuiding if hasattr(scope, "IsPulseGuiding") else None
-    slewing = scope.Slewing if hasattr(scope, "Slewing") else None
-    side_of_pier = scope.SideOfPier if hasattr(scope, "SideOfPier") else None
-    scope.Connected = False
-    return ra, dec, tracking, at_park, is_pulse_guiding, slewing, side_of_pier
-
-def get_camera_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Camera")
-    if not device_id:
-        print("No camera selected.")
-        return {"connected": False}
-    cam = win32com.client.Dispatch(device_id)
-    status = {}
+def query_nina_api(endpoint):
+    """Query NINA API at the specified endpoint."""
     try:
-        cam.Connected = True
-        time.sleep(1)  # Give hardware/driver time to update status
-        status["connected"] = True
-        status["cooler_on"] = cam.CoolerOn if hasattr(cam, "CoolerOn") else None
-        status["cooler_power"] = cam.CoolerPower if hasattr(cam, "CoolerPower") else None
-        status["sensor_temp"] = cam.CCDTemperature if hasattr(cam, "CCDTemperature") else None
-        cam.Connected = False
-    except Exception as e:
-        print(f"Camera error: {e}")
-        status = {"connected": False}
-    return status
+        response = requests.get(f"{NINA_API_URL}{endpoint}", timeout=5)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"[{get_timestamp()}] Error connecting to NINA API: {e}")
+        return None
 
-def get_dome_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Dome")
-    if not device_id:
-        print("No dome selected.")
-        return {"connected": False}
-    dome = win32com.client.Dispatch(device_id)
-    status = {}
-    try:
-        dome.Connected = True
-        status["connected"] = True
-        status["shutter_status"] = dome.ShutterStatus if hasattr(dome, "ShutterStatus") else None
-        dome.Connected = False
-    except Exception as e:
-        print(f"Dome error: {e}")
-        status = {"connected": False}
-    return status
+def check_camera_status():
+    """Check if the camera is connected and get its temperature."""
+    print(f"[{get_timestamp()}] Querying NINA for camera status...")
+    
+    # First check if NINA is running and connected
+    status_data = query_nina_api(NINA_API_ENDPOINT_STATUS)
+    if not status_data:
+        print(f"[{get_timestamp()}] NINA API not reachable.")
+        return False, None, None, False, 0
+    
+    # Now get camera info
+    camera_data = query_nina_api(NINA_API_ENDPOINT_CAMERA)
+    if not camera_data:
+        print(f"[{get_timestamp()}] Cannot retrieve camera data.")
+        return False, None, None, False, 0
+    
+    camera_info = camera_data.get("Response", {})
+    if not camera_info.get("Connected", False):
+        print(f"[{get_timestamp()}] Camera is not connected.")
+        return False, None, None, False, 0
 
-def get_filterwheel_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("FilterWheel")
-    if not device_id:
-        print("No filter wheel selected.")
-        return {"connected": False}
-    fw = win32com.client.Dispatch(device_id)
-    status = {}
+    # Get temperature if available
+    temperature = camera_info.get("Temperature", None)
+    # Get TargetTemp if available
+    target_temp = camera_info.get("TargetTemp", None)
+    # Get CoolerOn status
+    cooler_on = camera_info.get("CoolerOn", False)
+    # Get CoolerPower
+    cooler_power = camera_info.get("CoolerPower", 0)
+    return True, temperature, target_temp, cooler_on, cooler_power
+
+def check_focuser_status():
+    """Check if the focuser is connected and get its position."""
+    print(f"[{get_timestamp()}] Querying NINA for focuser status...")
+    
+    # Get focuser info
+    focuser_data = query_nina_api(NINA_API_ENDPOINT_FOCUSER)
+    if not focuser_data:
+        print(f"[{get_timestamp()}] Cannot retrieve focuser data.")
+        return False, None
+    
+    focuser_info = focuser_data.get("Response", {})
+    if not focuser_info.get("Connected", False):
+        print(f"[{get_timestamp()}] Focuser is not connected.")
+        return False, None
+
+    # Get position if available
+    position = focuser_info.get("Position", None)
+    return True, position
+
+def check_mount_status():
+    """Check if the mount is connected and get its position and status."""
+    print(f"[{get_timestamp()}] Querying NINA for mount status...")
+    
+    # Get mount info
+    mount_data = query_nina_api(NINA_API_ENDPOINT_MOUNT)
+    if not mount_data:
+        print(f"[{get_timestamp()}] Cannot retrieve mount data.")
+        return False, None, None, False, False, False
+    
+    mount_info = mount_data.get("Response", {})
+    if not mount_info.get("Connected", False):
+        print(f"[{get_timestamp()}] Mount is not connected.")
+        return False, None, None, False, False, False
+
+    # Extract coordinates
+    ra = mount_info.get("RightAscension", None)
+    dec = mount_info.get("Declination", None)
+    
+    # Extract status flags
+    at_park = mount_info.get("AtPark", False)
+    at_home = mount_info.get("AtHome", False)
+    slewing = mount_info.get("Slewing", False)
+    
+    return True, ra, dec, at_park, at_home, slewing
+
+def check_dome_status():
+    """Check if the dome is connected and get its shutter status."""
+    print(f"[{get_timestamp()}] Querying NINA for dome status...")
+    
+    dome_data = query_nina_api(NINA_API_ENDPOINT_DOME)
+    if not dome_data:
+        print(f"[{get_timestamp()}] Cannot retrieve dome data.")
+        return False, None
+    
+    dome_info = dome_data.get("Response", {})
+    is_connected = dome_info.get("Connected", False)
+    
+    if not is_connected:
+        print(f"[{get_timestamp()}] Dome is not connected.")
+        return False, None
+    
+    # Get shutter status
+    shutter_status = dome_info.get("ShutterStatus", None)
+    return True, shutter_status
+
+def check_filterwheel_status():
+    """Check if the filter wheel is connected and get the selected filter name."""
+    print(f"[{get_timestamp()}] Querying NINA for filter wheel status...")
+    
+    filterwheel_data = query_nina_api(NINA_API_ENDPOINT_FILTERWHEEL)
+    if not filterwheel_data:
+        print(f"[{get_timestamp()}] Cannot retrieve filter wheel data.")
+        return False, None
+    
+    filterwheel_info = filterwheel_data.get("Response", {})
+    is_connected = filterwheel_info.get("Connected", False)
+    
+    if not is_connected:
+        print(f"[{get_timestamp()}] Filter wheel is not connected.")
+        return False, None
+    
+    # Get selected filter information
+    selected_filter = filterwheel_info.get("SelectedFilter", {})
+    filter_name = selected_filter.get("Name", None)
+    
+    return True, filter_name
+
+def check_guider_status():
+    """Check if the guider is connected and get RMS error."""
+    print(f"[{get_timestamp()}] Querying NINA for guider status...")
+    
+    guider_data = query_nina_api(NINA_API_ENDPOINT_GUIDER)
+    if not guider_data:
+        print(f"[{get_timestamp()}] Cannot retrieve guider data.")
+        return False, None
+    
+    guider_info = guider_data.get("Response", {})
+    is_connected = guider_info.get("Connected", False)
+    
+    if not is_connected:
+        print(f"[{get_timestamp()}] Guider is not connected.")
+        return False, None
+    
+    # Get RMS error information
+    rms_error = None
+    if "RMSError" in guider_info and "Total" in guider_info["RMSError"]:
+        rms_error = guider_info["RMSError"]["Total"].get("Arcseconds", None)
+    
+    return True, rms_error
+
+# MQTT settings
+MQTT_BROKER = "192.168.1.49"  # Replace with your MQTT broker address
+MQTT_PORT = 1883
+MQTT_TOPIC = "obsybox/equipment"
+MQTT_CLIENT_ID = "nina-monitor"
+
+def publish_to_mqtt(data):
     try:
-        fw.Connected = True
-        status["connected"] = True
-        pos = fw.Position if hasattr(fw, "Position") else None
-        status["position"] = pos
-        if hasattr(fw, "Names"):
-            names = fw.Names
-            if names and pos is not None and pos < len(names):
-                status["filter"] = names[pos]
-            else:
-                status["filter"] = None
+        # Create a flat JSON structure
+        flat_json = {
+            # Measurement name as a field
+            "measurement": "telescope_equipment",
+            
+            # Camera data
+            "camera_connected": 1 if data['camera']['connected'] else 0,
+            "camera_temperature": data["camera"]["temperature"],
+            "camera_target_temperature": data["camera"]["target_temperature"],
+            "camera_cooler_on": 1 if data['camera']['cooler_on'] else 0,
+            "camera_cooler_power": data["camera"]["cooler_power"],
+            
+            # Focuser data
+            "focuser_connected": 1 if data['focuser']['connected'] else 0,
+            "focuser_position": data["focuser"]["position"],
+            
+            # Mount data
+            "mount_connected": 1 if data['mount']['connected'] else 0,
+            "mount_ra": data["mount"]["ra"],
+            "mount_dec": data["mount"]["dec"],
+            "mount_at_park": 1 if data['mount']['at_park'] else 0,
+            "mount_at_home": 1 if data['mount']['at_home'] else 0,
+            "mount_slewing": 1 if data['mount']['slewing'] else 0,
+            
+            # Dome data
+            "dome_connected": 1 if data['dome']['connected'] else 0,
+            "dome_shutter_status": data["dome"]["shutter_status"],
+            
+            # Filterwheel data
+            "filterwheel_connected": 1 if data['filterwheel']['connected'] else 0,
+            "filterwheel_filter": data["filterwheel"]["selected_filter"],
+            
+            # Guider data
+            "guider_connected": 1 if data['guider']['connected'] else 0,
+            "guider_rms_error": data["guider"]["rms_error_arcsec"],
+            
+            # Timestamp (as string)
+            "timestamp": get_timestamp()
+        }
+        
+        # Remove None values
+        flat_json = {k: v for k, v in flat_json.items() if v is not None}
+        
+        # Create MQTT client
+        client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=mqtt.CallbackAPIVersion.VERSION1)
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        
+        # Convert to JSON string
+        payload = json.dumps(flat_json)
+        print(f"MQTT payload: {payload}")
+        
+        result = client.publish(MQTT_TOPIC, payload, qos=1)
+        
+        if result.rc == mqtt.MQTT_ERR_SUCCESS:
+            print(f"[{get_timestamp()}] Successfully published to {MQTT_TOPIC}")
         else:
-            status["filter"] = None
-        fw.Connected = False
+            print(f"[{get_timestamp()}] Failed to publish to MQTT: {result}")
+            
+        client.disconnect()
+        return True
     except Exception as e:
-        print(f"FilterWheel error: {e}")
-        status = {"connected": False}
-    return status
+        print(f"[{get_timestamp()}] MQTT error: {e}")
+        return False
 
-def get_focuser_status():
-    pythoncom.CoInitialize()
-    device_id = get_device_id("Focuser")
-    if not device_id:
-        print("No focuser selected.")
-        return {"connected": False}
-    focuser = win32com.client.Dispatch(device_id)
-    status = {}
+def main():
+    print(f"[{get_timestamp()}] Starting NINA equipment monitoring...")
+    
     try:
-        if focuser.Connected:
-            status["connected"] = True
-            status["position"] = focuser.Position if hasattr(focuser, "Position") else None
-            status["is_moving"] = focuser.IsMoving if hasattr(focuser, "IsMoving") else None
-            status["temperature"] = focuser.Temperature if hasattr(focuser, "Temperature") else None
-        else:
-            status["connected"] = False
-    except Exception as e:
-        print(f"Focuser error: {e}")
-        status = {"connected": False}
-    return status
+        # Get camera status
+        is_camera_connected, temperature, target_temp, cooler_on, cooler_power = check_camera_status()
 
-def publish(topic, payload, retries=3, delay=2):
-    for attempt in range(retries):
-        try:
-            client = mqtt.Client(protocol=mqtt.MQTTv5)
-            client.connect(MQTT_BROKER, MQTT_PORT, 60)
-            client.publish(topic, json.dumps(payload))
-            print(f"Published to {topic}: {payload}")
-            client.disconnect()
-            return
-        except Exception as e:
-            print(f"MQTT publish failed (attempt {attempt+1}/{retries}): {e}")
-            time.sleep(delay)
-    print(f"Failed to publish to {topic} after {retries} attempts.")
+        # Get focuser status
+        is_focuser_connected, focuser_position = check_focuser_status()
+        
+        # Get mount status
+        is_mount_connected, ra, dec, at_park, at_home, slewing = check_mount_status()
+        
+        # Get dome status
+        is_dome_connected, shutter_status = check_dome_status()
+        
+        # Get filter wheel status
+        is_filterwheel_connected, selected_filter = check_filterwheel_status()
+
+        # Get guider status
+        is_guider_connected, rms_error = check_guider_status()
+
+        # Create results JSON
+        result = {
+            "camera": {
+                "connected": is_camera_connected,
+                "temperature": temperature,
+                "target_temperature": target_temp,
+                "cooler_on": cooler_on,
+                "cooler_power": cooler_power
+            },
+            "focuser": {
+                "connected": is_focuser_connected,
+                "position": focuser_position
+            },
+            "mount": {
+                "connected": is_mount_connected,
+                "ra": ra,
+                "dec": dec,
+                "at_park": at_park,
+                "at_home": at_home,
+                "slewing": slewing
+            },
+            "dome": {
+                "connected": is_dome_connected,
+                "shutter_status": shutter_status
+            },
+            "filterwheel": {
+                "connected": is_filterwheel_connected,
+                "selected_filter": selected_filter
+            },
+            "guider": {
+                "connected": is_guider_connected,
+                "rms_error_arcsec": rms_error
+            },
+            "timestamp": get_timestamp()
+        }
+        
+        # Print results locally
+        print(f"\nResults summary: {json.dumps(result, indent=2)}")
+        
+        # Publish to MQTT
+        mqtt_success = publish_to_mqtt(result)
+        if mqtt_success:
+            print(f"[{get_timestamp()}] Data sent to MQTT topic {MQTT_TOPIC}")
+        else:
+            print(f"[{get_timestamp()}] Failed to send data to MQTT")
+            
+    except KeyboardInterrupt:
+        print(f"[{get_timestamp()}] Monitoring stopped by user.")
+    except Exception as e:
+        print(f"[{get_timestamp()}] Error: {e}")
 
 if __name__ == "__main__":
-    ra, dec, tracking, at_park, is_pulse_guiding, slewing, side_of_pier = get_mount_ra_dec()
-    if ra is not None and dec is not None:
-        publish(MQTT_TOPIC_MOUNT, {
-            "ra": ra,
-            "dec": dec,
-            "tracking": tracking,
-            "at_park": at_park,
-            "is_pulse_guiding": is_pulse_guiding,
-            "slewing": slewing,
-            "side_of_pier": side_of_pier
-        })
-
-    camera_status = get_camera_status()
-    publish(MQTT_TOPIC_CAMERA, camera_status)
-
-    dome_status = get_dome_status()
-    publish(MQTT_TOPIC_DOME, dome_status)
-
-    filterwheel_status = get_filterwheel_status()
-    publish(MQTT_TOPIC_FILTERWHEEL, filterwheel_status)
-
-    focuser_status = get_focuser_status()
-    publish(MQTT_TOPIC_FOCUSER, focuser_status)
+    main()
