@@ -249,6 +249,8 @@ def publish_to_mqtt(data):
 
 def main():
     print(f"[{get_timestamp()}] Starting NINA equipment monitoring...")
+    print(f"[{get_timestamp()}] Using NINA API URL: {NINA_API_URL}")
+    print(f"[{get_timestamp()}] Using MQTT broker: {MQTT_BROKER}:{MQTT_PORT}")
     print(f"[{get_timestamp()}] Monitoring will update every 30 seconds. Press Ctrl+C to exit.")
     
     try:
@@ -330,3 +332,6 @@ def main():
     except KeyboardInterrupt:
         print(f"[{get_timestamp()}] Monitoring stopped by user.")
         print(f"[{get_timestamp()}] Exiting...")
+
+if __name__ == "__main__":
+    main()
