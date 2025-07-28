@@ -249,76 +249,84 @@ def publish_to_mqtt(data):
 
 def main():
     print(f"[{get_timestamp()}] Starting NINA equipment monitoring...")
+    print(f"[{get_timestamp()}] Monitoring will update every 30 seconds. Press Ctrl+C to exit.")
     
     try:
-        # Get camera status
-        is_camera_connected, temperature, target_temp, cooler_on, cooler_power = check_camera_status()
+        while True:  # Endless loop
+            try:
+                # Get camera status
+                is_camera_connected, temperature, target_temp, cooler_on, cooler_power = check_camera_status()
 
-        # Get focuser status
-        is_focuser_connected, focuser_position = check_focuser_status()
-        
-        # Get mount status
-        is_mount_connected, ra, dec, at_park, at_home, slewing = check_mount_status()
-        
-        # Get dome status
-        is_dome_connected, shutter_status = check_dome_status()
-        
-        # Get filter wheel status
-        is_filterwheel_connected, selected_filter = check_filterwheel_status()
+                # Get focuser status
+                is_focuser_connected, focuser_position = check_focuser_status()
+                
+                # Get mount status
+                is_mount_connected, ra, dec, at_park, at_home, slewing = check_mount_status()
+                
+                # Get dome status
+                is_dome_connected, shutter_status = check_dome_status()
+                
+                # Get filter wheel status
+                is_filterwheel_connected, selected_filter = check_filterwheel_status()
 
-        # Get guider status
-        is_guider_connected, rms_error = check_guider_status()
+                # Get guider status
+                is_guider_connected, rms_error = check_guider_status()
 
-        # Create results JSON
-        result = {
-            "camera": {
-                "connected": is_camera_connected,
-                "temperature": temperature,
-                "target_temperature": target_temp,
-                "cooler_on": cooler_on,
-                "cooler_power": cooler_power
-            },
-            "focuser": {
-                "connected": is_focuser_connected,
-                "position": focuser_position
-            },
-            "mount": {
-                "connected": is_mount_connected,
-                "ra": ra,
-                "dec": dec,
-                "at_park": at_park,
-                "at_home": at_home,
-                "slewing": slewing
-            },
-            "dome": {
-                "connected": is_dome_connected,
-                "shutter_status": shutter_status
-            },
-            "filterwheel": {
-                "connected": is_filterwheel_connected,
-                "selected_filter": selected_filter
-            },
-            "guider": {
-                "connected": is_guider_connected,
-                "rms_error_arcsec": rms_error
-            },
-            "timestamp": get_timestamp()
-        }
-        
-        # Print results locally
-        print(f"\nResults summary: {json.dumps(result, indent=2)}")
-        
-        # Publish to MQTT
-        mqtt_success = publish_to_mqtt(result)
-        if mqtt_success:
-            print(f"[{get_timestamp()}] Data sent to MQTT topic {MQTT_TOPIC}")
-        else:
-            print(f"[{get_timestamp()}] Failed to send data to MQTT")
-            
+                # Create results JSON
+                result = {
+                    "camera": {
+                        "connected": is_camera_connected,
+                        "temperature": temperature,
+                        "target_temperature": target_temp,
+                        "cooler_on": cooler_on,
+                        "cooler_power": cooler_power
+                    },
+                    "focuser": {
+                        "connected": is_focuser_connected,
+                        "position": focuser_position
+                    },
+                    "mount": {
+                        "connected": is_mount_connected,
+                        "ra": ra,
+                        "dec": dec,
+                        "at_park": at_park,
+                        "at_home": at_home,
+                        "slewing": slewing
+                    },
+                    "dome": {
+                        "connected": is_dome_connected,
+                        "shutter_status": shutter_status
+                    },
+                    "filterwheel": {
+                        "connected": is_filterwheel_connected,
+                        "selected_filter": selected_filter
+                    },
+                    "guider": {
+                        "connected": is_guider_connected,
+                        "rms_error_arcsec": rms_error
+                    },
+                    "timestamp": get_timestamp()
+                }
+                
+                # Print results locally
+                print(f"\nResults summary: {json.dumps(result, indent=2)}")
+                
+                # Publish to MQTT
+                mqtt_success = publish_to_mqtt(result)
+                if mqtt_success:
+                    print(f"[{get_timestamp()}] Data sent to MQTT topic {MQTT_TOPIC}")
+                else:
+                    print(f"[{get_timestamp()}] Failed to send data to MQTT")
+                
+                # Wait for 30 seconds before next update
+                print(f"[{get_timestamp()}] Next update in 30 seconds...")
+                time.sleep(30)
+                
+            except Exception as e:
+                print(f"[{get_timestamp()}] Error in monitoring cycle: {e}")
+                print(f"[{get_timestamp()}] Will try again in 30 seconds")
+                time.sleep(30)  # Continue the loop even after errors
+                
     except KeyboardInterrupt:
         print(f"[{get_timestamp()}] Monitoring stopped by user.")
-    except Exception as e:
-        print(f"[{get_timestamp()}] Error: {e}")
-
-if __name__ == "__main__":
-    main()
+        print(f"[{get_timestamp()}] Exiting...")
