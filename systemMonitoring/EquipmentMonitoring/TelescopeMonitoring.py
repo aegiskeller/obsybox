@@ -9,7 +9,7 @@ NINA_API_URL = "http://localhost:1888"
 NINA_API_ENDPOINT_CAMERA = "/v2/api/equipment/camera/info"
 NINA_API_ENDPOINT_STATUS = "/v2/api/version"
 NINA_API_ENDPOINT_FOCUSER = "/v2/api/equipment/focuser/info"  # Added focuser endpoint
-NINA_API_ENDPOINT_MOUNT = "/v2/api/equipment/telescope/info"  # Added mount endpoint
+NINA_API_ENDPOINT_MOUNT = "/v2/api/equipment/mount/info"  # Added mount endpoint
 NINA_API_ENDPOINT_DOME = "/v2/api/equipment/dome/info"
 NINA_API_ENDPOINT_FILTERWHEEL = "/v2/api/equipment/filterwheel/info"
 NINA_API_ENDPOINT_GUIDER = "/v2/api/equipment/guider/info"  # Added guider endpoint
@@ -85,30 +85,44 @@ def check_focuser_status():
     return True, position
 
 def check_mount_status():
-    """Check if the mount is connected and get its position and status."""
+    """Check if the mount is connected and get its key status and coordinates."""
     print(f"[{get_timestamp()}] Querying NINA for mount status...")
-    
-    # Get mount info
+
     mount_data = query_nina_api(NINA_API_ENDPOINT_MOUNT)
     if not mount_data:
         print(f"[{get_timestamp()}] Cannot retrieve mount data.")
-        return False, None, None, False, False, False
-    
-    mount_info = mount_data.get("Response", {})
-    if not mount_info.get("Connected", False):
-        print(f"[{get_timestamp()}] Mount is not connected.")
-        return False, None, None, False, False, False
+        return {
+            "connected": False,
+            "at_park": None,
+            "at_home": None,
+            "ra_degrees": None,
+            "dec": None,
+            "altitude": None,
+            "azimuth": None
+        }
 
-    # Extract coordinates
-    ra = mount_info.get("RightAscension", None)
-    dec = mount_info.get("Declination", None)
-    
-    # Extract status flags
-    at_park = mount_info.get("AtPark", False)
-    at_home = mount_info.get("AtHome", False)
-    slewing = mount_info.get("Slewing", False)
-    
-    return True, ra, dec, at_park, at_home, slewing
+    mount_info = mount_data.get("Response", {})
+    print(mount_info)
+    connected = mount_info.get("Connected", False)
+    at_park = mount_info.get("AtPark", None)
+    at_home = mount_info.get("AtHome", None)
+    coords = mount_info.get("Coordinates", {})
+    ra_degrees = coords.get("RADegrees", None)
+    dec = coords.get("Dec", None)
+    altitude = mount_info.get("Altitude", None)
+    azimuth = mount_info.get("Azimuth", None)
+    tracking_enabled = mount_info.get("TrackingEnabled", None)
+
+    return {
+        "connected": connected,
+        "at_park": at_park,
+        "at_home": at_home,
+        "ra_degrees": ra_degrees,
+        "dec": dec,
+        "altitude": altitude,
+        "azimuth": azimuth,
+        "tracking_enabled": tracking_enabled
+    }
 
 def check_dome_status():
     """Check if the dome is connected and get its shutter status."""
@@ -201,11 +215,13 @@ def publish_to_mqtt(data):
             
             # Mount data
             "mount_connected": 1 if data['mount']['connected'] else 0,
-            "mount_ra": data["mount"]["ra"],
+            "mount_at_park": 1 if data['mount']['at_park'] else 0 if data['mount']['at_park'] is not None else None,
+            "mount_at_home": 1 if data['mount']['at_home'] else 0 if data['mount']['at_home'] is not None else None,
+            "mount_ra_degrees": data["mount"]["ra_degrees"],
             "mount_dec": data["mount"]["dec"],
-            "mount_at_park": 1 if data['mount']['at_park'] else 0,
-            "mount_at_home": 1 if data['mount']['at_home'] else 0,
-            "mount_slewing": 1 if data['mount']['slewing'] else 0,
+            "mount_altitude": data["mount"]["altitude"],
+            "mount_azimuth": data["mount"]["azimuth"],
+            "mount_tracking_enabled": 1 if data["mount"].get("tracking_enabled") else 0 if data["mount"].get("tracking_enabled") is not None else None,
             
             # Dome data
             "dome_connected": 1 if data['dome']['connected'] else 0,
@@ -263,7 +279,7 @@ def main():
                 is_focuser_connected, focuser_position = check_focuser_status()
                 
                 # Get mount status
-                is_mount_connected, ra, dec, at_park, at_home, slewing = check_mount_status()
+                mount_status = check_mount_status()
                 
                 # Get dome status
                 is_dome_connected, shutter_status = check_dome_status()
@@ -287,14 +303,7 @@ def main():
                         "connected": is_focuser_connected,
                         "position": focuser_position
                     },
-                    "mount": {
-                        "connected": is_mount_connected,
-                        "ra": ra,
-                        "dec": dec,
-                        "at_park": at_park,
-                        "at_home": at_home,
-                        "slewing": slewing
-                    },
+                    "mount": mount_status,
                     "dome": {
                         "connected": is_dome_connected,
                         "shutter_status": shutter_status
