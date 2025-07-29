@@ -5,7 +5,7 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 
 # NINA API settings
-NINA_API_URL = "http://192.168.1.8:1888"
+NINA_API_URL = "http://localhost:1888"
 NINA_API_ENDPOINT_CAMERA = "/v2/api/equipment/camera/info"
 NINA_API_ENDPOINT_STATUS = "/v2/api/version"
 NINA_API_ENDPOINT_FOCUSER = "/v2/api/equipment/focuser/info"  # Added focuser endpoint
