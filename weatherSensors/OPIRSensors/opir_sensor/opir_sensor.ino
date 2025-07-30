@@ -54,19 +54,37 @@ void setup() {
   //IPAddress dns(8, 8, 8, 8);
   WiFi.config(local_IP, gateway, subnet);
 
-  // WiFi connection with watchdog resets
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  unsigned long wifiStartTime = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - wifiStartTime > 60000) { // 1 minute timeout for WiFi
-      Serial.println("\nWiFi connection timeout. Rebooting...");
-      delay(1000);
-      Watchdog.reset(); // Let the watchdog do the reset
+  // WiFi connection with hardware reset
+  int attempts = 0;
+  const int maxAttempts = 3;
+  
+  while (attempts < maxAttempts) {
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to WiFi (attempt " + String(attempts + 1) + "/" + String(maxAttempts) + ")");
+    
+    unsigned long wifiStartTime = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+      if (millis() - wifiStartTime > 20000) { // 20 second timeout per attempt
+        Serial.println("\nWiFi connection timeout.");
+        WiFi.end();  // Clean up before next attempt
+        delay(1000);
+        break;
+      }
+      delay(500);
+      Serial.print(".");
+      Watchdog.reset();
     }
-    delay(500);
-    Serial.print(".");
-    Watchdog.reset();
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      break;  // Successfully connected
+    }
+    
+    attempts++;
+    if (attempts >= maxAttempts) {
+      Serial.println("\nAll WiFi connection attempts failed. Performing hardware reset...");
+      delay(1000);
+      NVIC_SystemReset();  // Force hardware reset
+    }
   }
   Serial.println("\nWiFi connected. IP address: ");
   Serial.println(WiFi.localIP());
