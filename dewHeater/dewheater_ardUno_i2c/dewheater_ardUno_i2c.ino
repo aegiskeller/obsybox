@@ -9,13 +9,31 @@
 #include <string.h>
 #include <stdlib.h>
 #include <Wire.h>
+#include <Adafruit_AHTX0.h>
 
 #define DHTpin 10 
 #define DHTTYPE DHT11
 #define NUMSAMPLES 10            // how many samples to average in order to smooth reading
 
 DHT dht(DHTpin,DHTTYPE);
+Adafruit_AHTX0 aht10;
 
+void setup()
+{
+  Serial.begin(9600); //if needed for debugging
+  dht.begin();
+  Wire.begin(0x08);
+  Wire.onReceive(receiveEvent); /* register receive event */
+  Wire.onRequest(requestEvent); /* register request event */
+  delay(500);      //and wait a bit for conversion to finish
+
+  // Initialize AHT10
+  if (!aht10.begin()) {
+    Serial.println("Could not find AHT10 sensor! Check wiring.");
+  } else {
+    Serial.println("AHT10 sensor found.");
+  }
+}
 
 //#include <avr/pgmspace.h>
 // Big lookup Table (approx 750 entries), subtract 238 from ADC reading to start at 0*C. Entries in 10ths of degree i.e. 242 = 24.2*C Covers 0*C to 150*C For 10k resistor/10k thermistor voltage divider w/ therm on the + side.
@@ -53,16 +71,6 @@ String getValue(String data, char separator, int index)
   }
 
   return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
-}
-
-void setup()
-{
-  Serial.begin(9600); //if needed for debugging
-  dht.begin();
-  Wire.begin(0x08);
-  Wire.onReceive(receiveEvent); /* register receive event */
-  Wire.onRequest(requestEvent); /* register request event */
-  delay(500);      //and wait a bit for conversion to finish
 }
 
 void loop()
