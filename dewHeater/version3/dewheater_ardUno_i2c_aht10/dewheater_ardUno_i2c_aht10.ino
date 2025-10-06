@@ -86,11 +86,6 @@ void loop()
   float ds18b20_temp = ds18b20.getTempCByIndex(0);
   int teletemp = ds18b20_temp * 10; // tenths of a degree
 
-  if (ds18b20_temp == DEVICE_DISCONNECTED_C) {
-    Serial.println("DS18B20 not found, using 0 for teletemp");
-    teletemp = 0;
-    thermerror = thermerror | 1;
-  }
 
   // --- AHT10 readings ---
   sensors_event_t humidity, temp;
@@ -99,6 +94,13 @@ void loop()
   int ambtemp = temp.temperature * 10; // Now using AHT10 for temperature
   int ambhum = humidity.relative_humidity * 10; // Using AHT10 for humidity
   dptemp = ambtemp - ((1000-ambhum)/5);
+
+  if (ds18b20_temp == DEVICE_DISCONNECTED_C) {
+    Serial.println("DS18B20 not found, using AMB for teletemp");
+    teletemp = ambtemp;
+    thermerror = thermerror | 1;
+  }
+
 
   Serial.print(F("Hmdty: "));
   Serial.print((float)ambhum/10);
