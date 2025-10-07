@@ -10,7 +10,7 @@ char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 
 float rainSensorValue = 0.0;
-float safeState = 512;
+float safeState = 999;
 
 WiFiServer server(80);
 
@@ -467,17 +467,31 @@ void loop() {
     lastSafetySample = millis();
 
     bool isSafe = averagedValue < safeState;
+    // Serial.print("Current sensor value: ");
+    // Serial.print(averagedValue);
+    // Serial.print(", Safe state threshold: ");
+    // Serial.println(safeState);
+    
     if ((cloudsVal >= 0 && cloudsVal > maxClouds)) {
       isSafe = false;
-      Serial.println("Clouds too high, not safe");
+      Serial.print("Clouds too high: Current=");
+      Serial.print(cloudsVal);
+      Serial.print(", Max=");
+      Serial.println(maxClouds);
     }
     if ((windVal >= 0 && windVal > maxWind)) {
       isSafe = false;
-      Serial.println("Wind too high, not safe");
+      Serial.print("Wind too high: Current=");
+      Serial.print(windVal);
+      Serial.print(", Max=");
+      Serial.println(maxWind);
     }
     if ((humidityVal >= 0 && humidityVal > maxHumidity)) {
       isSafe = false;
-      Serial.println("Humidity too high, not safe");
+      Serial.print("Humidity too high: Current=");
+      Serial.print(humidityVal);
+      Serial.print(", Max=");
+      Serial.println(maxHumidity);
     }
 
     safetyHistory[safetyHistoryIdx] = isSafe;
@@ -498,6 +512,13 @@ void loop() {
     }
     // Median: more than half are safe
     medianSafe = (safeCount > SAFETY_HISTORY_LEN / 2);
+    
+    Serial.print("Safety history: Safe count = ");
+    Serial.print(safeCount);
+    Serial.print(" out of ");
+    Serial.print(SAFETY_HISTORY_LEN);
+    Serial.print(" samples. Median safe = ");
+    Serial.println(medianSafe ? "true" : "false");
 
     // --- Publish safety status to MQTT ---
     String reason = medianSafe ? "All conditions safe (median)" : "Unsafe (median)";
@@ -581,6 +602,45 @@ void loop() {
       } else {
         Serial.print("notsafe#");
       }
+      // Print detailed reason after the standard response
+      Serial.println("\nSafety Status Details:");
+      Serial.print("Rain sensor value: ");
+      Serial.print(averagedValue);
+      Serial.print(" (threshold: ");
+      Serial.print(safeState);
+      Serial.println(")");
+      
+      if (lastWeatherJson.length() > 0) {
+        Serial.print("Clouds: ");
+        Serial.print(cloudsVal);
+        Serial.print("% (max: ");
+        Serial.print(maxClouds);
+        Serial.println("%)");
+        
+        Serial.print("Wind: ");
+        Serial.print(windVal);
+        Serial.print(" m/s (max: ");
+        Serial.print(maxWind);
+        Serial.println(" m/s)");
+        
+        Serial.print("Humidity: ");
+        Serial.print(humidityVal);
+        Serial.print("% (max: ");
+        Serial.print(maxHumidity);
+        Serial.println("%)");
+      } else {
+        Serial.println("No weather data available");
+      }
+      
+      Serial.print("Safety history: ");
+      int safeCount = 0;
+      for (int i = 0; i < SAFETY_HISTORY_LEN; i++) {
+        if (safetyHistory[i]) safeCount++;
+      }
+      Serial.print(safeCount);
+      Serial.print(" safe readings out of ");
+      Serial.print(SAFETY_HISTORY_LEN);
+      Serial.println(" samples");
     }
   }
 }
