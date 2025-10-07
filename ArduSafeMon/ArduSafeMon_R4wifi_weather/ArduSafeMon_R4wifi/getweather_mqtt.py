@@ -76,7 +76,7 @@ def main():
     mqtt_client.loop_start()
 
     # Start periodic weather fetch and MQTT publish
-    periodic_weather_mqtt(api_key, city, mqtt_client, MQTT_TOPIC, interval=600)
+    periodic_weather_mqtt(api_key, city, mqtt_client, MQTT_TOPIC, interval=120)
 
 if __name__ == "__main__":
     main()

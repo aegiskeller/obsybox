@@ -6,7 +6,7 @@ char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 
 // MQTT settings
-const char* mqtt_broker = "192.168.1.49";  // Your MQTT broker IP
+const char* mqtt_broker = "192.168.1.49";  
 const int mqtt_port = 1883;
 const char* mqtt_topic = "obsybox/weather";
 const unsigned long mqtt_publish_interval = 60000;  // Publish every 60 seconds
