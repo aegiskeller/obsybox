@@ -1,0 +1,42 @@
+# Double-star query parameters
+# DEJ2000 range in degrees (signed): min then max
+dej2000_min = -40.0
+dej2000_max = 0.0
+
+# Last observation year threshold: select Obs2 values less than this
+obs2_before = 2020
+
+# Separation (arcseconds)
+sep_min = 4.0
+sep_max = 120.0
+
+# Magnitude ranges
+mag1_min = 8.0
+mag1_max = 12.0
+mag2_min = 8.0
+mag2_max = 14.0
+
+# Output options
+output_tsv = wds_ds_results.tsv
+export_limit = 0  # 0 = export all matches, >0 = limit rows exported
+write_output = False  # Set to True to write TSV to disk
+
+# SQLite database path (adjust if necessary)
+db_path = wds_catalog.sqlite
+
+# Chunk size used when scanning the large table (rows)
+chunk_size = 20000
+ 
+# Observer location for twilight/LST calculations
+observer_latitude = -34.9285
+observer_longitude = 150
+observer_elevation = 500
+
+# Target selection after twilight
+# Number of targets to select (including the one closest to twilight)
+n_targets = 10
+# Time step between selected target RAs in hours
+t_step_hours = 0.1
+# Which twilight to use: 'evening' or 'morning'
+twilight_type = evening
+write_nina = True

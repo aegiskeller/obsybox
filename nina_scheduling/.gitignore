@@ -1,0 +1,5 @@
+nina_selected_targets
+templates/
+wds_catalog.sqlite*
+observations.sqlite*
+*.pyc
