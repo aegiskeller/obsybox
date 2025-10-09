@@ -1,0 +1,5 @@
+flask
+astropy
+astroquery
+pandas
+requests

@@ -6,3 +6,5 @@ observations.sqlite*
 *.pyc
 *.template.json
 __pycache__/
+.venv/
+pushover_secrets.py
