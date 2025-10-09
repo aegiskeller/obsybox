@@ -28,9 +28,9 @@ db_path = wds_catalog.sqlite
 chunk_size = 20000
  
 # Observer location for twilight/LST calculations
-observer_latitude = -34.9285
-observer_longitude = 150
-observer_elevation = 500
+observer_latitude = -35.35
+observer_longitude = 149.03
+observer_elevation = 580
 
 # Target selection after twilight
 # Number of targets to select (including the one closest to twilight)

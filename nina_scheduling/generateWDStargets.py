@@ -8,6 +8,18 @@ If not present, it will scan the `wds` table in chunks and parse DEJ2000 strings
 
 Outputs a TSV file with matching rows (configurable in parameters).
 """
+__doc__ += """
+
+Usage example:
+    python query_wds_by_params.py
+
+To search the WDS table and output 10 targets, set the following in ds_parameters.txt:
+    export_limit = 10
+    write_output = True
+
+This will write the results to the output_tsv file specified in ds_parameters.txt (default: wds_ds_results.tsv).
+"""
+
 import sqlite3
 import os
 from pathlib import Path
@@ -275,7 +287,7 @@ def main():
     last_selected_targets = pd.DataFrame(selected)
 
     # --- Write N.I.N.A. target files for selected targets ---
-    def write_nina_targets(selected_df, template_path='Double Star.template.json', out_dir='nina_selected_targets'):
+    def write_nina_targets(selected_df, template_path='Double_Star.template.json', out_dir='WDS_targets'):
         # Load template once
         with open(template_path, 'r') as tf:
             template = json.load(tf)

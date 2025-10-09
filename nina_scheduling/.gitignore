@@ -1,5 +1,8 @@
 nina_selected_targets
+WDS_targets
 templates/
 wds_catalog.sqlite*
 observations.sqlite*
 *.pyc
+*.template.json
+__pycache__/

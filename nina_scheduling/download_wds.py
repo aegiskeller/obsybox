@@ -3,8 +3,8 @@
 Download a CDS Vizier catalog and store it in a local SQLite database optimized for
 searching and modification.
 
-Function: download_vizier_catalog(catalog='wcs', sqlite_path='wcs_catalog.sqlite',
-                                  table_name='wcs', index_cols=None, force=False, row_limit=-1)
+Function: download_vizier_catalog(catalog='B/wds/wds', sqlite_path='wds_catalog.sqlite',
+                                  table_name='wds', index_cols=None, force=False, row_limit=-1)
 
 - catalog: Vizier catalog identifier or name (string). Example: 'B/wds/wds' or 'wcs'.
 - sqlite_path: path to output SQLite file
@@ -44,9 +44,9 @@ except Exception:
     PANDAS_AVAILABLE = False
 
 
-def download_vizier_catalog(catalog: str = 'wcs',
-                            sqlite_path: str = 'wcs_catalog.sqlite',
-                            table_name: str = 'wcs',
+def download_vizier_catalog(catalog: str = 'B/wds/wds',
+                            sqlite_path: str = 'wds_catalog.sqlite',
+                            table_name: str = 'wds',
                             index_cols: Optional[List[str]] = None,
                             force: bool = False,
                             row_limit: int = -1) -> Dict[str, Any]:
@@ -166,19 +166,16 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Download a Vizier catalog and store locally (SQLite preferred).')
-    parser.add_argument('--catalog', '-c', default='wcs', help='Vizier catalog identifier (default: wcs)')
-    parser.add_argument('--sqlite', '-s', default='wcs_catalog.sqlite', help='Output SQLite file path')
-    parser.add_argument('--table', '-t', default='wcs', help='Table name inside SQLite DB')
+    parser.add_argument('--catalog', '-c', default='B/wds/wds', help='Vizier catalog identifier (default: B/wds/wds)')
+    parser.add_argument('--sqlite', '-s', default='wds_catalog.sqlite', help='Output SQLite file path')
+    parser.add_argument('--table', '-t', default='wds', help='Table name inside SQLite DB')
     parser.add_argument('--index', '-i', action='append', help='Column to create an index on (can be repeated)')
     parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing table if present')
-    parser.add_argument('--rows', '-r', type=int, default=10, help='Row limit for testing; use -1 for full download')
+    parser.add_argument('--rows', '-r', type=int, default=-1, help='Row limit for testing; use -1 for full download')
     args = parser.parse_args()
 
-    # For safety by default run a small sample unless user explicitly sets rows=-1
-    if args.rows == -1:
-        row_limit = -1
-    else:
-        row_limit = args.rows
+    # Use the specified row limit directly
+    row_limit = args.rows
 
     try:
         meta = download_vizier_catalog(catalog=args.catalog, sqlite_path=args.sqlite,
