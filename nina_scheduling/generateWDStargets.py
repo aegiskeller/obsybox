@@ -72,15 +72,30 @@ def load_params(path: str) -> dict:
 
 
 def parse_dec_to_deg(dec_str: str) -> float:
+    """
+    Parse declination string in format 'DD MM SS.SS' to decimal degrees.
+    Handles negative declination correctly.
+    
+    Examples:
+    '+42 30 15.5' -> +42.5043
+    '-15 30 45.0' -> -15.5125
+    """
     try:
         parts = dec_str.strip().split()
         d = float(parts[0])
         m = float(parts[1])
         s = float(parts[2])
+        
+        # Convert minutes and seconds to decimal degrees
+        decimal_offset = m/60.0 + s/3600.0
+        
+        # Handle negative declination
         if dec_str.strip().startswith('-') or d < 0:
-            return d - m/60.0 - s/3600.0
+            # For negative declination, subtract the minutes/seconds portion
+            return d - decimal_offset
         else:
-            return abs(d) + m/60.0 + s/3600.0
+            # For positive declination, add the minutes/seconds portion
+            return d + decimal_offset
     except Exception:
         return float('nan')
 
@@ -288,11 +303,16 @@ def main():
 
     # --- Write N.I.N.A. target files for selected targets ---
     def write_nina_targets(selected_df, template_path='Double_Star.template.json', out_dir='WDS_targets'):
+        # Create date-stamped subdirectory
+        from datetime import datetime
+        date_stamp = datetime.now().strftime('%Y%m%d')
+        dated_out_dir = os.path.join(out_dir, date_stamp)
+        
         # Load template once
         with open(template_path, 'r') as tf:
             template = json.load(tf)
 
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(dated_out_dir, exist_ok=True)
 
         def parse_ra(ra_str):
             parts = ra_str.strip().split()
@@ -303,7 +323,13 @@ def main():
             parts = dec_str.strip().split()
             d = int(float(parts[0])); m = int(float(parts[1])); s = float(parts[2])
             neg = dec_str.strip().startswith('-') or d < 0
-            return neg, abs(d), m, s
+            
+            # N.I.N.A expects DecDegrees to be negative when NegativeDec is true
+            # Special case: preserve -0.0 for "-00" declinations
+            if neg and d == 0:
+                return neg, -0.0, m, s
+            
+            return neg, d, m, s
 
         # helper to set the TakeExposure ExposureTime value inside template recursively
         def set_take_exposure_time(obj, exposure_seconds):
@@ -385,7 +411,7 @@ def main():
             filename = ''.join(c if c not in invalid_chars else '_' for c in raw_name)
             # Also collapse multiple spaces
             filename = '_'.join(filename.split())
-            out_path = os.path.join(out_dir, filename)
+            out_path = os.path.join(dated_out_dir, filename)
             with open(out_path, 'w') as out_f:
                 json.dump(tjson, out_f, indent=2)
             created_files.append(out_path)
