@@ -55,3 +55,4 @@ arduino_secrets.h
 .env
 secrets.py
 ascom_api
+.venv

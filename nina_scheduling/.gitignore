@@ -8,3 +8,7 @@ observations.sqlite*
 __pycache__/
 .venv/
 pushover_secrets.py
+secrets.py
+*.html
+*.json
+*.csv
