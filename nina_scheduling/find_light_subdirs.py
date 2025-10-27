@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
-Scan a base path (default: D:\) and for each immediate child directory look for a
-subdirectory named 'LIGHT'. If found, record the names of all subdirectories
-inside that 'LIGHT' directory.
+Scan a base path and find LIGHT subdirectories containing observations.
 
-Outputs a CSV (default) or JSON containing rows with:
-- parent_dir: the directory under the base path that contains LIGHT
-- light_path: full path to the LIGHT directory
-- subdir: name of a subdirectory inside LIGHT
+This script scans for LIGHT directories under dated folders (YYYY-MM-DD format)
+and can import them into the observation database.
+
+The new database schema properly models:
+- Sequences: NINA sequence files that can be reused across nights
+- Observation Nights: Individual nights with metadata
+- Targets: Astronomical objects with coordinates and properties
+- Scheduled Targets: Targets scheduled for specific nights
+- Observations: Individual image captures with full metadata
 
 Usage examples:
-  python find_light_subdirs.py                 # scans D:\ and writes light_subdirs.csv
-  python find_light_subdirs.py --base-path C:\ --out results.json --format json
-  python find_light_subdirs.py --base-path . --out nina_light.csv
-
-The script is conservative about permissions and will skip unreadable folders.
+  # Import into database
+  python find_light_subdirs.py --base-path D:\ --db observations.sqlite --telescope SCT
+  
+  # Dry run to see what would be imported
+  python find_light_subdirs.py --base-path D:\ --dry-run
+  
+  # Legacy CSV/JSON output (deprecated)
+  python find_light_subdirs.py --base-path D:\ --out results.csv
 """
 from pathlib import Path
 import argparse
@@ -100,72 +106,25 @@ def write_json(rows, out_path: Path):
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='Find subdirectories inside LIGHT folders under each child of a base path.')
+    p = argparse.ArgumentParser(description='Find and import LIGHT subdirectories into observation database')
     p.add_argument('--base-path', default='D:\\', help='Base path to scan (default: D:\\)')
-    # database options
-    p.add_argument('--db', default='observations.sqlite', help='Path to SQLite database to write results (default observations.sqlite)')
-    p.add_argument('--telescope', default='SCT', help='Telescope name to record in the observations table (default: SCT)')
-    p.add_argument('--dateobs', default=None, help='Observation date to record (YYYY-MM-DD). Defaults to today')
-    p.add_argument('--dry-run', action='store_true', help='Do not write to DB; just print what would be inserted')
-    p.add_argument('--format', choices=('csv', 'json'), help='(Deprecated) Force output format (overrides extension)')
-    p.add_argument('--out', default='light_subdirs.csv', help='(Deprecated) Output filename (CSV or JSON by extension)')
+    
+    # Database options (primary usage)
+    p.add_argument('--db', default='observations.sqlite', 
+                   help='Path to SQLite database (default: observations.sqlite)')
+    p.add_argument('--telescope', default='SCT', 
+                   help='Telescope name (default: SCT)')
+    p.add_argument('--dry-run', action='store_true', 
+                   help='Do not write to DB; just print what would be inserted')
+    
+    # Legacy CSV/JSON options (deprecated)
+    p.add_argument('--format', choices=('csv', 'json'), 
+                   help='(Deprecated) Force output format')
+    p.add_argument('--out', default=None, 
+                   help='(Deprecated) Output filename for CSV/JSON')
+    
     p.add_argument('--verbose', action='store_true')
     return p.parse_args()
-
-
-def ensure_observations_table(db_path: Path):
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS observations (
-        id INTEGER PRIMARY KEY,
-        target TEXT NOT NULL,
-        dateobs DATE,
-        telescope TEXT,
-        processed DATETIME,
-        UNIQUE(target, dateobs)
-    )
-    ''')
-    conn.commit()
-    return conn
-
-
-def write_to_db(rows, db_path: Path, telescope: str, dateobs: str, dry_run: bool = False):
-    """Write discovered rows into the observations table. target is the full path to the subdir inside LIGHT."""
-    if not rows:
-        logging.info('No rows to insert into DB')
-        return 0
-    # don't overwrite per-row dateobs; dateobs param is fallback
-    today_iso = date.today().isoformat()
-    inserted = 0
-    if dry_run:
-        for r in rows:
-            # target will be the subdir name only
-            target = r['subdir']
-            row_dateobs = r.get('dateobs') or dateobs or today_iso
-            print(f'Would insert: target={target} dateobs={row_dateobs} telescope={telescope or None}')
-        return 0
-
-    conn = ensure_observations_table(Path(db_path))
-    cur = conn.cursor()
-    try:
-        for r in rows:
-            # store only the subdir name as the target
-            target = r['subdir']
-            row_dateobs = r.get('dateobs') or dateobs or today_iso
-            try:
-                cur.execute('INSERT OR IGNORE INTO observations (target, dateobs, telescope, processed) VALUES (?, ?, ?, ?)',
-                            (target, row_dateobs, telescope or None, None))
-                if cur.rowcount:
-                    inserted += 1
-            except Exception as e:
-                logging.warning('Failed to insert %s: %s', target, e)
-        conn.commit()
-    finally:
-        conn.close()
-    logging.info('Inserted %d new rows into %s', inserted, db_path)
-    return inserted
 
 
 def main():
@@ -174,35 +133,54 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     base = Path(args.base_path)
-    out = Path(args.out)
-    fmt = args.format
-    if fmt is None:
-        if out.suffix.lower() == '.json':
-            fmt = 'json'
-        else:
-            fmt = 'csv'
-
+    
     logging.info("Scanning base path: %s", base)
     rows = find_light_subdirs(base)
     logging.info("Found %d subdirectories inside LIGHT folders", len(rows))
-
-    # If a DB path is provided (default is observations.sqlite), write to DB
-    if args.db:
-        # Use per-row dateobs where available; args.dateobs is fallback
-        if args.dry_run:
-            write_to_db(rows, Path(args.db), args.telescope, args.dateobs, dry_run=True)
-        else:
-            inserted = write_to_db(rows, Path(args.db), args.telescope, args.dateobs, dry_run=False)
-            logging.info('Inserted %d rows into %s', inserted, args.db)
+    
+    if not rows:
+        logging.warning("No LIGHT subdirectories found")
         return 0
 
-    # Fallback: write CSV/JSON (deprecated path)
-    if fmt == 'csv':
-        write_csv(rows, out)
-    else:
-        write_json(rows, out)
-
-    logging.info("Wrote results to %s", out)
+    # Primary usage: Import into database
+    if args.db and not args.out:
+        from observation_db import ObservationDB
+        
+        db = ObservationDB(args.db)
+        
+        if args.dry_run:
+            logging.info("DRY RUN - No changes will be made")
+            for r in rows:
+                target_name = r['subdir']
+                date_obs = r.get('dateobs') or 'today'
+                print(f"Would import: target={target_name} date={date_obs} telescope={args.telescope}")
+            return 0
+        
+        # Import into database
+        stats = db.import_light_subdirs(base, telescope=args.telescope, dry_run=False)
+        logging.info("Import complete: %s", stats)
+        return 0
+    
+    # Legacy: write CSV/JSON if --out is specified
+    if args.out:
+        out = Path(args.out)
+        fmt = args.format
+        if fmt is None:
+            fmt = 'json' if out.suffix.lower() == '.json' else 'csv'
+        
+        if fmt == 'csv':
+            write_csv(rows, out)
+        else:
+            write_json(rows, out)
+        
+        logging.info("Wrote results to %s", out)
+        return 0
+    
+    # Default: print summary
+    print(f"\nFound {len(rows)} targets in LIGHT directories:")
+    for r in rows:
+        print(f"  {r['subdir']} - {r.get('dateobs', 'no date')} - {r['light']}")
+    print(f"\nUse --db to import into database")
     return 0
 
 
