@@ -19,6 +19,9 @@ from selenium.webdriver.chrome.options import Options
 from secrets import VARASTRO_USERNAME, VARASTRO_PASSWORD
 from datetime import datetime, timedelta
 import math
+import sqlite3
+import tkinter as tk
+from tkinter import messagebox
 
 # Astropy imports for accurate astronomical calculations
 from astropy.coordinates import EarthLocation, AltAz, SkyCoord, SkyCoord as coord
@@ -262,11 +265,23 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
                     
                 if len(cells) >= 10:
                     # Extract basic visible data
+                    star_name = cells[2].text.strip()
+                    constellation = cells[3].text.strip()
+                    
+                    # For named variables (not WDS catalog), combine name with constellation
+                    # WDS targets start with 'G' followed by numbers
+                    if star_name and not star_name.startswith('G'):
+                        # Named variable: combine name and constellation (e.g., "CH" + "Scl" = "CH Scl")
+                        full_name = f"{star_name} {constellation}" if constellation else star_name
+                    else:
+                        # WDS catalog target: keep as-is (e.g., "G1234.56789")
+                        full_name = star_name
+                    
                     target = {
                         'id': cells[0].text.strip(),
                         'entries': cells[1].text.strip(),
-                        'name': cells[2].text.strip(),
-                        'constellation': cells[3].text.strip(),
+                        'name': full_name,
+                        'constellation': constellation,
                         'minima_type': cells[4].text.strip(),
                         'mag_max': cells[5].text.strip(),
                         'mag_min': cells[6].text.strip(),
@@ -869,6 +884,28 @@ def check_altitude_during_observation(target: Dict, lat: float, lon: float, skip
         except:
             return False
 
+def format_target_display_name(target: Dict) -> str:
+    """
+    Format target name for display in logs.
+    WDS targets (starting with 'G') show as: G1234.56789 (Constellation)
+    Named variables already include constellation: CH Scl
+    
+    Args:
+        target: Target dictionary with 'name' and 'constellation' keys
+        
+    Returns:
+        Formatted target name string
+    """
+    name = target.get('name', '')
+    constellation = target.get('constellation', '')
+    
+    # If name starts with 'G', it's a WDS catalog target - show constellation in parentheses
+    if name.startswith('G') and constellation:
+        return f"{name} ({constellation})"
+    else:
+        # Named variables already have constellation in the name (e.g., "CH Scl")
+        return name
+
 def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> List[Dict]:
     """
     Select optimal targets for the night based on timing and altitude constraints
@@ -923,7 +960,7 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
                 # Include if obs starts after buffer time, or in early morning (wrapped around midnight)
                 valid_targets.append(target)
             else:
-                logger.debug(f"Skipping {target['name']} ({target.get('constellation', '')}) - observation would start at {obs_start_time_only} before dark sky at {dark_sky_time_only}")
+                logger.debug(f"Skipping {format_target_display_name(target)} - observation would start at {obs_start_time_only} before dark sky at {dark_sky_time_only}")
     
     logger.info(f"Found {len(valid_targets)} targets observable after dark sky")
     
@@ -950,7 +987,7 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
         first_target_candidates.sort(key=lambda x: x[1])
         best_first_target = first_target_candidates[0][0]
         selected_targets.append(best_first_target)
-        logger.info(f"Selected target 1: {best_first_target['name']} ({best_first_target.get('constellation', '')}) at {best_first_target['minima_datetime_local'].strftime('%H:%M')} local ({best_first_target['minimum_time']} UTC)")
+        logger.info(f"Selected target 1: {format_target_display_name(best_first_target)} at {best_first_target['minima_datetime_local'].strftime('%H:%M')} local ({best_first_target['minimum_time']} UTC)")
         
         # Find second target (~4 hours after first)
         second_target_hour = (first_target_hour + TARGET_SPACING) % 24
@@ -977,7 +1014,7 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
             second_target_candidates.sort(key=lambda x: x[1])
             best_second_target = second_target_candidates[0][0]
             selected_targets.append(best_second_target)
-            logger.info(f"Selected target 2: {best_second_target['name']} ({best_second_target.get('constellation', '')}) at {best_second_target['minima_datetime_local'].strftime('%H:%M')} local ({best_second_target['minimum_time']} UTC)")
+            logger.info(f"Selected target 2: {format_target_display_name(best_second_target)} at {best_second_target['minima_datetime_local'].strftime('%H:%M')} local ({best_second_target['minimum_time']} UTC)")
     
     # Now do detailed altitude checks with coordinate lookups for selected targets only
     logger.info("Performing detailed altitude checks for selected targets...")
@@ -1478,12 +1515,126 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     logger.info(f"Exported {len(targets)} NINA JSON files")
 
 
+def check_already_observed(targets: List[Dict], observation_date: date, db_path: Path) -> tuple[List[str], List[str]]:
+    """
+    Check if any targets have already been observed or scheduled on the specified night.
+    
+    Args:
+        targets: List of target dictionaries
+        observation_date: Date to check for observations/scheduling
+        db_path: Path to database
+    
+    Returns:
+        Tuple of (already_observed_targets, already_scheduled_targets)
+    """
+    if not db_path.exists():
+        return [], []
+    
+    obs_date_str = observation_date.strftime('%Y-%m-%d')
+    already_observed = []
+    already_scheduled = []
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        for target in targets:
+            target_name = target.get('name', target.get('Star', 'Unknown'))
+            
+            # Check if this target has exposures on this observation night
+            cursor.execute('''
+                SELECT COUNT(*) FROM nina_log_exposures 
+                WHERE target_name = ? AND observation_night = ?
+            ''', (target_name, obs_date_str))
+            
+            count = cursor.fetchone()[0]
+            if count > 0:
+                already_observed.append(target_name)
+            
+            # Check if this target is already scheduled for this night (but not yet observed)
+            cursor.execute('''
+                SELECT COUNT(*) FROM nina_scheduled_targets 
+                WHERE target_name = ? 
+                AND scheduled_for_night = ?
+                AND observed_on IS NULL
+            ''', (target_name, obs_date_str))
+            
+            scheduled_count = cursor.fetchone()[0]
+            if scheduled_count > 0 and target_name not in already_observed:
+                already_scheduled.append(target_name)
+        
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Could not check for already-observed/scheduled targets: {e}")
+    
+    return already_observed, already_scheduled
+
+
+def prompt_user_confirmation(already_observed: List[str], already_scheduled: List[str], observation_date: date) -> bool:
+    """
+    Display a dialog box asking user if they want to proceed with scheduling
+    targets that have already been observed or scheduled.
+    
+    Args:
+        already_observed: List of target names already observed
+        already_scheduled: List of target names already scheduled (but not observed)
+        observation_date: Date targets are scheduled for
+    
+    Returns:
+        True if user wants to proceed, False otherwise
+    """
+    # Create a hidden root window
+    root = tk.Tk()
+    root.withdraw()
+    
+    obs_date_str = observation_date.strftime('%Y-%m-%d')
+    
+    # Build message based on what was found
+    message_parts = []
+    
+    if already_observed:
+        if len(already_observed) == 1:
+            message_parts.append(
+                f"Target '{already_observed[0]}' has already been OBSERVED on {obs_date_str}."
+            )
+        else:
+            targets_list = "\n  • ".join(already_observed)
+            message_parts.append(
+                f"The following {len(already_observed)} targets have already been OBSERVED on {obs_date_str}:\n"
+                f"  • {targets_list}"
+            )
+    
+    if already_scheduled:
+        if len(already_scheduled) == 1:
+            message_parts.append(
+                f"Target '{already_scheduled[0]}' is already SCHEDULED for {obs_date_str} (not yet observed)."
+            )
+        else:
+            targets_list = "\n  • ".join(already_scheduled)
+            message_parts.append(
+                f"The following {len(already_scheduled)} targets are already SCHEDULED for {obs_date_str} (not yet observed):\n"
+                f"  • {targets_list}"
+            )
+    
+    message = "\n\n".join(message_parts)
+    message += "\n\nDo you want to schedule them again?"
+    
+    result = messagebox.askyesno(
+        "Targets Already Observed or Scheduled",
+        message,
+        icon='warning'
+    )
+    
+    root.destroy()
+    return result
+
+
 def record_scheduled_targets(targets: List[Dict], observation_date: date, db_path: Path = None, telescope: str = None):
     """
     Record scheduled targets in the observation database.
     
     Args:
-        targets: List of target dictionaries with 'name' key
+        targets: List of target dictionaries with 'name', 'ra', 'dec', etc.
         observation_date: Date targets are scheduled for
         db_path: Path to database (optional, uses default if not specified)
         telescope: Telescope name (optional, defaults to 'SCT 8-inch')
@@ -1500,15 +1651,28 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
     if telescope is None:
         telescope = "SCT 8-inch"  # Default telescope
     
-    # Extract target names from dictionaries
-    target_names = [t.get('name', 'Unknown') for t in targets]
+    # Check if any targets have already been observed or scheduled
+    already_observed, already_scheduled = check_already_observed(targets, observation_date, db_path)
+    
+    if already_observed or already_scheduled:
+        total_issues = len(already_observed) + len(already_scheduled)
+        logger.warning(f"{total_issues} target(s) already observed or scheduled on {observation_date}")
+        
+        # Ask user if they want to proceed
+        if not prompt_user_confirmation(already_observed, already_scheduled, observation_date):
+            logger.info("User cancelled scheduling of already-observed/scheduled targets")
+            return
+        else:
+            logger.info("User confirmed to proceed with scheduling")
+    
+    # Pass full target dictionaries (not just names) to preserve metadata
     obs_date_str = observation_date.strftime('%Y-%m-%d')
     
     try:
-        marked = mark_targets_scheduled(db_path, target_names, obs_date_str, telescope)
+        marked = mark_targets_scheduled(db_path, targets, obs_date_str, telescope)
         if marked > 0:
             logger.info(f"Marked {marked} existing exposures as scheduled in database")
-        logger.info(f"Recorded {len(target_names)} targets as scheduled for {obs_date_str}")
+        logger.info(f"Recorded {len(targets)} targets as scheduled for {obs_date_str}")
     except Exception as e:
         logger.warning(f"Could not record scheduled targets in database: {e}")
     

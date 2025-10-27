@@ -10,9 +10,17 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import json
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import threading
 import queue
+import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy.time import Time
+import astropy.units as u
 
 # Import the main target finding functionality
 from findTargets import (
@@ -20,6 +28,8 @@ from findTargets import (
     select_targets_for_night,
     export_to_nina_format,
     export_to_nina_json,
+    record_scheduled_targets,
+    format_target_display_name,
     LATITUDE, LONGITUDE, MAG_MIN, MAG_MAX, MIN_ALTITUDE,
     ALLOWED_AZIMUTHS, MIN_DECLINATION, MAX_DECLINATION,
     OBSERVATION_WINDOW, MIN_ALTITUDE_DURING_OBS, TARGET_SPACING,
@@ -84,7 +94,17 @@ class TargetSelectorGUI:
             bg=COLORS['bg_dark'],
             fg='#ff4444'
         )
-        title_label.pack(pady=(0, 20))
+        title_label.pack(pady=(0, 5))
+        
+        # Subtitle
+        subtitle_label = tk.Label(
+            main_container,
+            text="Designed for EB selection from Varastro.cz ephemera",
+            font=('Helvetica', 10, 'italic'),
+            bg=COLORS['bg_dark'],
+            fg=COLORS['text_dim']
+        )
+        subtitle_label.pack(pady=(0, 20))
         
         # Create notebook for tabs
         self.notebook = ttk.Notebook(main_container)
@@ -93,10 +113,12 @@ class TargetSelectorGUI:
         # Create tabs
         self.config_frame = self.create_config_tab()
         self.targets_frame = self.create_targets_tab()
+        self.airmass_frame = self.create_airmass_tab()
         self.log_frame = self.create_log_tab()
         
         self.notebook.add(self.config_frame, text="  Configuration  ")
         self.notebook.add(self.targets_frame, text="  Targets  ")
+        self.notebook.add(self.airmass_frame, text="  Airmass Plot  ")
         self.notebook.add(self.log_frame, text="  Log  ")
         
         # Status bar
@@ -169,6 +191,26 @@ class TargetSelectorGUI:
         
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Add logo at the top
+        try:
+            from PIL import Image, ImageTk
+            logo_path = Path(__file__).parent / "varstar_logo.png"
+            if logo_path.exists():
+                logo_img = Image.open(logo_path)
+                # Resize logo to reasonable size (keeping aspect ratio)
+                logo_img.thumbnail((200, 200), Image.Resampling.LANCZOS)
+                self.logo_photo = ImageTk.PhotoImage(logo_img)
+                
+                logo_label = tk.Label(
+                    scrollable_frame,
+                    image=self.logo_photo,
+                    bg=COLORS['bg_dark']
+                )
+                logo_label.pack(pady=(10, 20))
+        except Exception as e:
+            # Silently fail if logo can't be loaded
+            pass
         
         # Location settings card
         self.create_card(scrollable_frame, "📍 Observer Location", [
@@ -433,6 +475,26 @@ class TargetSelectorGUI:
         
         return frame
     
+    def create_airmass_tab(self):
+        """Create the airmass plot tab"""
+        frame = tk.Frame(self.notebook, bg=COLORS['bg_dark'])
+        
+        # Info label
+        info_label = tk.Label(
+            frame,
+            text="Airmass curves will appear here after target generation",
+            bg=COLORS['bg_dark'],
+            fg=COLORS['text_dim'],
+            font=('Helvetica', 10)
+        )
+        info_label.pack(pady=20)
+        
+        # Container for matplotlib figure
+        self.plot_container = tk.Frame(frame, bg=COLORS['bg_dark'])
+        self.plot_container.pack(fill='both', expand=True, padx=20, pady=(0, 20))
+        
+        return frame
+    
     def create_log_tab(self):
         """Create the log display tab"""
         frame = tk.Frame(self.notebook, bg=COLORS['bg_dark'])
@@ -624,7 +686,7 @@ class TargetSelectorGUI:
         
         # Target details
         for i, target in enumerate(self.selected_targets, 1):
-            self.targets_text.insert('end', f"TARGET {i}: {target['name']} ({target.get('constellation', 'N/A')})\n")
+            self.targets_text.insert('end', f"TARGET {i}: {format_target_display_name(target)}\n")
             self.targets_text.insert('end', "-" * 80 + "\n")
             self.targets_text.insert('end', f"  Star ID:           {target.get('id', 'N/A')}\n")
             self.targets_text.insert('end', f"  RA:                {target.get('ra', 'N/A')}\n")
@@ -650,8 +712,240 @@ class TargetSelectorGUI:
         self.export_button.config(state='normal')
         self.export_csv_button.config(state='normal')
         
+        # Plot airmass curves
+        self._plot_airmass_curves()
+        
         # Switch to targets tab
         self.notebook.select(1)
+    
+    def _plot_airmass_curves(self):
+        """Plot airmass curves for selected targets"""
+        if not self.selected_targets:
+            return
+        
+        # Clear any existing plot
+        for widget in self.plot_container.winfo_children():
+            widget.destroy()
+        
+        # Import required modules
+        import findTargets
+        
+        # Create figure with dark background
+        fig = Figure(figsize=(10, 6), facecolor=COLORS['bg_dark'])
+        ax1 = fig.add_subplot(111, facecolor=COLORS['bg_medium'])
+        ax2 = ax1.twinx()
+        
+        # Set up observer location
+        location = EarthLocation(
+            lat=findTargets.LATITUDE * u.deg,
+            lon=findTargets.LONGITUDE * u.deg,
+            height=300 * u.m
+        )
+        
+        # Generate time array for the night (sunset to sunrise, roughly 18:00 to 06:00 local)
+        obs_date = date.today()
+        start_time = datetime.combine(obs_date, datetime.min.time()) + timedelta(hours=18)
+        end_time = start_time + timedelta(hours=12)
+        
+        time_array = []
+        current = start_time
+        while current <= end_time:
+            time_array.append(current)
+            current += timedelta(minutes=10)
+        
+        # Convert to astropy Time (UTC)
+        utc_times = [t - timedelta(hours=findTargets.TIMEZONE_OFFSET) for t in time_array]
+        astropy_times = Time([t.isoformat() for t in utc_times])
+        
+        # Plot colors for targets
+        colors_list = ['#4ecca3', '#ffd93d', '#ff6b6b', '#4a5fb5']
+        
+        # Store all target data for tooltips
+        all_target_data = []
+        
+        for idx, target in enumerate(self.selected_targets[:4]):  # Limit to 4 targets
+            try:
+                # Parse RA/Dec
+                ra_str = target.get('ra', '')
+                dec_str = target.get('dec', '')
+                
+                if not ra_str or not dec_str:
+                    continue
+                
+                # Create SkyCoord
+                coord = SkyCoord(ra_str, dec_str, unit=(u.hourangle, u.deg))
+                
+                # Calculate altitude and airmass for each time point
+                altitudes = []
+                airmasses = []
+                
+                for t in astropy_times:
+                    altaz = coord.transform_to(AltAz(obstime=t, location=location))
+                    alt = altaz.alt.deg
+                    altitudes.append(alt)
+                    
+                    # Calculate airmass (sec(z) where z is zenith angle)
+                    # Only valid for altitudes > 0
+                    if alt > 0:
+                        zenith_angle = 90 - alt
+                        airmass = 1.0 / np.cos(np.radians(zenith_angle))
+                        # Clamp airmass to reasonable values
+                        airmass = min(airmass, 5.0)
+                    else:
+                        airmass = np.nan
+                    airmasses.append(airmass)
+                
+                # Store data for this target
+                all_target_data.append({
+                    'name': format_target_display_name(target),
+                    'times': time_array,
+                    'airmasses': airmasses,
+                    'altitudes': altitudes,
+                    'color': colors_list[idx % len(colors_list)]
+                })
+                
+                # Plot airmass curve
+                color = colors_list[idx % len(colors_list)]
+                line, = ax1.plot(time_array, airmasses, 
+                        color=color, 
+                        linewidth=2, 
+                        label=format_target_display_name(target),
+                        alpha=0.8)
+                
+                # Mark scheduled start and end times (minima ± 2 hours)
+                if 'minima_datetime_local' in target:
+                    minima_time = target['minima_datetime_local']
+                    scheduled_start_time = minima_time - timedelta(hours=2)
+                    scheduled_end_time = minima_time + timedelta(hours=2)
+                    
+                    # Find closest time points for markers
+                    for marker_time in [scheduled_start_time, scheduled_end_time]:
+                        if start_time <= marker_time <= end_time:
+                            # Find index of closest time
+                            time_diffs = [abs((t - marker_time).total_seconds()) for t in time_array]
+                            closest_idx = time_diffs.index(min(time_diffs))
+                            
+                            if closest_idx < len(airmasses) and not np.isnan(airmasses[closest_idx]):
+                                ax1.plot(time_array[closest_idx], airmasses[closest_idx],
+                                        'o', color='red', markersize=10, 
+                                        markeredgecolor='white', markeredgewidth=2,
+                                        zorder=10)
+            
+            except Exception as e:
+                self.log_message(f"Error plotting {target.get('name', 'unknown')}: {e}", 'warning')
+                continue
+        
+        # Configure axes
+        ax1.set_xlabel('Local Time', color=COLORS['text'], fontsize=11)
+        ax1.set_ylabel('Airmass', color=COLORS['text'], fontsize=11)
+        ax1.set_ylim(2.4, 1.0)  # 2.4 at bottom (worst), 1.0 at top (best) - inverted Y axis
+        ax1.grid(True, alpha=0.2, color=COLORS['text_dim'])
+        
+        # Configure right axis for altitude
+        ax2.set_ylabel('Altitude (°)', color=COLORS['text'], fontsize=11)
+        ax2.set_ylim(25, 90)  # 25° at bottom, 90° at top - inverted to match airmass
+        
+        # Set up time axis formatting
+        import matplotlib.dates as mdates
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax1.xaxis.set_major_locator(mdates.HourLocator(interval=1))
+        fig.autofmt_xdate(rotation=45)
+        
+        # Style the axes
+        ax1.tick_params(colors=COLORS['text'], labelsize=9)
+        ax2.tick_params(colors=COLORS['text'], labelsize=9)
+        ax1.spines['bottom'].set_color(COLORS['text_dim'])
+        ax1.spines['top'].set_color(COLORS['text_dim'])
+        ax1.spines['left'].set_color(COLORS['text_dim'])
+        ax1.spines['right'].set_color(COLORS['text_dim'])
+        ax2.spines['right'].set_color(COLORS['text_dim'])
+        
+        # Add legend
+        ax1.legend(loc='upper right', facecolor=COLORS['bg_light'], 
+                  edgecolor=COLORS['text_dim'], labelcolor=COLORS['text'],
+                  fontsize=9)
+        
+        # Add title
+        fig.suptitle(f'Airmass Curves for {obs_date.strftime("%Y-%m-%d")}',
+                    color=COLORS['text'], fontsize=13, fontweight='bold')
+        
+        fig.tight_layout()
+        
+        # Embed plot in tkinter
+        canvas = FigureCanvasTkAgg(fig, master=self.plot_container)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill='both', expand=True)
+        
+        # Add toolbar
+        toolbar = NavigationToolbar2Tk(canvas, self.plot_container)
+        toolbar.update()
+        
+        # Enable interactive tooltips
+        self._setup_plot_tooltips(fig, ax1, all_target_data)
+    
+    def _setup_plot_tooltips(self, fig, ax, target_data):
+        """Setup interactive tooltips for the plot"""
+        import matplotlib.dates as mdates
+        
+        annot = ax.annotate("", xy=(0, 0), xytext=(15, 15),
+                           textcoords="offset points",
+                           bbox=dict(boxstyle="round,pad=0.5", fc=COLORS['bg_light'], 
+                                   ec=COLORS['text'], alpha=0.95, linewidth=2),
+                           color=COLORS['text'],
+                           fontsize=10,
+                           visible=False,
+                           zorder=100)
+        
+        def hover(event):
+            if event.inaxes == ax and event.xdata is not None and event.ydata is not None:
+                try:
+                    # Convert matplotlib date to datetime
+                    hover_time = mdates.num2date(event.xdata)
+                    hover_airmass = event.ydata
+                    
+                    # Find closest point across all targets
+                    min_time_diff = float('inf')
+                    closest_info = None
+                    
+                    for tgt in target_data:
+                        for i, (t, airmass) in enumerate(zip(tgt['times'], tgt['airmasses'])):
+                            if not np.isnan(airmass):
+                                # Calculate time difference in minutes
+                                time_diff = abs((t - hover_time).total_seconds()) / 60.0
+                                
+                                # If within 30 minutes, consider it
+                                if time_diff < 30:
+                                    if time_diff < min_time_diff:
+                                        min_time_diff = time_diff
+                                        closest_info = {
+                                            'time': t,
+                                            'airmass': airmass,
+                                            'altitude': tgt['altitudes'][i],
+                                            'name': tgt['name']
+                                        }
+                    
+                    # Show tooltip if we found a close point
+                    if closest_info is not None:
+                        time_str = closest_info['time'].strftime('%H:%M')
+                        text = (f"{closest_info['name']}\n"
+                               f"Time: {time_str}\n"
+                               f"Airmass: {closest_info['airmass']:.2f}\n"
+                               f"Altitude: {closest_info['altitude']:.1f}°")
+                        annot.set_text(text)
+                        annot.xy = (event.xdata, event.ydata)
+                        annot.set_visible(True)
+                        fig.canvas.draw_idle()
+                        return
+                
+                except Exception as e:
+                    self.log_message(f"Tooltip error: {e}", 'warning')
+            
+            # Hide tooltip if no valid point found or mouse outside axes
+            if annot.get_visible():
+                annot.set_visible(False)
+                fig.canvas.draw_idle()
+        
+        fig.canvas.mpl_connect("motion_notify_event", hover)
     
     def export_nina_json(self):
         """Export selected targets as NINA JSON files"""
@@ -660,12 +954,25 @@ class TargetSelectorGUI:
             return
         
         try:
+            # Record targets in database before exporting
+            obs_date = date.today()
+            self.log_message(f"Recording {len(self.selected_targets)} targets in database for {obs_date}...", 'info')
+            
+            try:
+                record_scheduled_targets(self.selected_targets, obs_date)
+                self.log_message(f"Recorded targets in database", 'success')
+            except Exception as e:
+                self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
+                # Continue with export even if database recording fails
+            
+            # Export NINA JSON files
             export_to_nina_json(self.selected_targets)
             self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files", 'success')
             messagebox.showinfo(
                 "Export Successful",
                 f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
-                f"{Path.cwd()}"
+                f"{Path.cwd()}\n\n"
+                f"Targets have been recorded in the database."
             )
         except Exception as e:
             self.log_message(f"Export failed: {str(e)}", 'error')

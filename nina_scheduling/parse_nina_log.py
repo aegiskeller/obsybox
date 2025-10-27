@@ -301,6 +301,13 @@ class NINALogParser:
             CREATE TABLE IF NOT EXISTS nina_scheduled_targets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 target_name TEXT NOT NULL,
+                ra TEXT,
+                dec TEXT,
+                constellation TEXT,
+                magnitude_max REAL,
+                magnitude_min REAL,
+                minima_type TEXT,
+                variability_type TEXT,
                 scheduled_for_night DATE NOT NULL,
                 observed_on DATE,
                 telescope TEXT,
@@ -579,7 +586,7 @@ def load_profile_map(map_file: Path) -> Dict[str, str]:
     return profile_map
 
 
-def mark_targets_scheduled(db_path: Path, targets: List[str], observation_date: str, telescope: str = None) -> int:
+def mark_targets_scheduled(db_path: Path, targets, observation_date: str, telescope: str = None) -> int:
     """
     Mark targets as scheduled in the database.
     
@@ -590,7 +597,7 @@ def mark_targets_scheduled(db_path: Path, targets: List[str], observation_date: 
     
     Args:
         db_path: Path to database
-        targets: List of target names
+        targets: List of target dictionaries (with 'name', 'ra', 'dec', etc.) or list of target name strings
         observation_date: Date scheduled for in YYYY-MM-DD format (scheduled_for_night)
         telescope: Telescope name (optional)
         
@@ -612,13 +619,31 @@ def mark_targets_scheduled(db_path: Path, targets: List[str], observation_date: 
     marked = 0
     for target in targets:
         try:
+            # Handle both dictionary and string inputs
+            if isinstance(target, dict):
+                target_name = target.get('name', target.get('Star', 'Unknown'))
+                ra = target.get('ra', target.get('RA'))
+                dec = target.get('dec', target.get('Dec'))
+                constellation = target.get('constellation')
+                mag_max = target.get('magnitude_max', target.get('mag_max'))
+                mag_min = target.get('magnitude_min', target.get('mag_min'))
+                minima_type = target.get('minima_type')
+                var_type = target.get('variability_type', target.get('var_type'))
+            else:
+                # String input - just the target name
+                target_name = target
+                ra = dec = constellation = mag_max = mag_min = minima_type = var_type = None
+            
             # Always register in scheduled_targets table
-            # This creates the "scheduled" record even if no observations exist yet
+            # Each scheduling creates a new entry (no UNIQUE constraint)
+            # This allows tracking multiple scheduling attempts for the same target
             cursor.execute('''
-                INSERT OR IGNORE INTO nina_scheduled_targets 
-                (target_name, scheduled_for_night, telescope)
-                VALUES (?, ?, ?)
-            ''', (target, observation_date, telescope))
+                INSERT INTO nina_scheduled_targets 
+                (target_name, ra, dec, constellation, magnitude_max, magnitude_min, 
+                 minima_type, variability_type, scheduled_for_night, telescope)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (target_name, ra, dec, constellation, mag_max, mag_min, 
+                  minima_type, var_type, observation_date, telescope))
             
             # Check if any exposures exist for this target on this date
             cursor.execute('''
@@ -626,7 +651,7 @@ def mark_targets_scheduled(db_path: Path, targets: List[str], observation_date: 
                 WHERE target_name = ?
                 AND observation_night = ?
                 AND (? IS NULL OR telescope = ?)
-            ''', (target, observation_date, telescope, telescope))
+            ''', (target_name, observation_date, telescope, telescope))
             
             exposure_count = cursor.fetchone()[0]
             
@@ -638,21 +663,29 @@ def mark_targets_scheduled(db_path: Path, targets: List[str], observation_date: 
                     WHERE target_name = ?
                     AND observation_night = ?
                     AND (? IS NULL OR telescope = ?)
-                ''', (target, observation_date, telescope, telescope))
+                ''', (target_name, observation_date, telescope, telescope))
                 
                 marked += cursor.rowcount
                 
-                # Update observed_on in scheduled_targets since exposures exist
+                # Update observed_on in the most recently scheduled entry
+                # (in case target was scheduled multiple times for the same night)
                 cursor.execute('''
                     UPDATE nina_scheduled_targets
                     SET observed_on = ?
-                    WHERE target_name = ?
-                    AND scheduled_for_night = ?
-                    AND (? IS NULL OR telescope = ?)
-                ''', (observation_date, target, observation_date, telescope, telescope))
+                    WHERE id = (
+                        SELECT id FROM nina_scheduled_targets
+                        WHERE target_name = ?
+                        AND scheduled_for_night = ?
+                        AND (? IS NULL OR telescope = ?)
+                        AND observed_on IS NULL
+                        ORDER BY scheduled_at DESC
+                        LIMIT 1
+                    )
+                ''', (observation_date, target_name, observation_date, telescope, telescope))
                 
         except Exception as e:
-            print(f"Warning: Could not mark target {target}: {e}")
+            target_display = target_name if 'target_name' in locals() else str(target)
+            print(f"Warning: Could not mark target {target_display}: {e}")
     
     conn.commit()
     conn.close()
