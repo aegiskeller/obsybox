@@ -12,3 +12,4 @@ secrets.py
 *.html
 *.json
 *.csv
+*.backup
