@@ -29,6 +29,14 @@ from astroquery.simbad import Simbad
 # Import exposure time calculator
 from exposure_time import get_exposure_time
 
+# Import scheduling database function
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from parse_nina_log import mark_targets_scheduled
+except ImportError:
+    mark_targets_scheduled = None  # Optional dependency
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1468,6 +1476,42 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         logger.info(f"Created NINA target file: {filepath}")
     
     logger.info(f"Exported {len(targets)} NINA JSON files")
+
+
+def record_scheduled_targets(targets: List[Dict], observation_date: date, db_path: Path = None, telescope: str = None):
+    """
+    Record scheduled targets in the observation database.
+    
+    Args:
+        targets: List of target dictionaries with 'name' key
+        observation_date: Date targets are scheduled for
+        db_path: Path to database (optional, uses default if not specified)
+        telescope: Telescope name (optional, defaults to 'SCT 8-inch')
+    """
+    if mark_targets_scheduled is None:
+        logger.warning("parse_nina_log module not available, skipping database recording")
+        return
+    
+    if db_path is None:
+        # Use default database name in same directory
+        db_path = Path(__file__).parent / "observations.sqlite"
+        logger.info(f"Using database: {db_path}")
+    
+    if telescope is None:
+        telescope = "SCT 8-inch"  # Default telescope
+    
+    # Extract target names from dictionaries
+    target_names = [t.get('name', 'Unknown') for t in targets]
+    obs_date_str = observation_date.strftime('%Y-%m-%d')
+    
+    try:
+        marked = mark_targets_scheduled(db_path, target_names, obs_date_str, telescope)
+        if marked > 0:
+            logger.info(f"Marked {marked} existing exposures as scheduled in database")
+        logger.info(f"Recorded {len(target_names)} targets as scheduled for {obs_date_str}")
+    except Exception as e:
+        logger.warning(f"Could not record scheduled targets in database: {e}")
+    
     
 if __name__ == "__main__":
     # Fetch all targets (will use cache if available for today)
@@ -1489,5 +1533,8 @@ if __name__ == "__main__":
             
             # Export NINA JSON files
             export_to_nina_json(selected)
+            
+            # Record scheduled targets in database
+            record_scheduled_targets(selected, date.today())
         else:
             logger.warning("No suitable targets found for tonight")
