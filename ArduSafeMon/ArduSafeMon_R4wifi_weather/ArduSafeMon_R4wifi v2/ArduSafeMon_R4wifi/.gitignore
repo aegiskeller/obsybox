@@ -1,5 +1,5 @@
 venv
 arduino_secrets.h
 ArduSafeMon_R4wifi/arduino_secrets.h
-test*
-.vs/
+weather.json
+weather_secrets.py

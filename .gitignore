@@ -56,3 +56,5 @@ arduino_secrets.h
 secrets.py
 ascom_api
 .venv
+.vs
+.vscode
