@@ -2,7 +2,6 @@
 #include <WiFiS3.h>
 #include "arduino_secrets.h"
 #include <WiFiClient.h>
-#include <EEPROM.h>
 #include <MQTT.h> // Add ArduinoMqttClient library
 #include <WDT.h> // Make sure this is the correct library
 
@@ -20,27 +19,32 @@ int sampleIndex = 0;
 unsigned long lastSampleTime = 0;
 float averagedValue = 0;
 
-String lastWeatherJson = "";
-unsigned long lastWeatherFetch = 0;
-const unsigned long weatherFetchInterval = 60000 ; // 10 minutes in ms
-
 // MQTT settings
 const char* mqtt_broker = "192.168.1.49"; // Set your broker IP
 const int mqtt_port = 1883;
-const char* mqtt_topic = "obsybox/weather";
+const char* mqtt_topic_safety = "obsybox/weathersafety";
 WiFiClient net;
-MQTTClient mqttClient(1024); // Buffer size for large JSON
+MQTTClient mqttClient(512); // Smaller buffer since we only publish
 
-float maxClouds = 100;
-float maxWind = 100;
-float maxHumidity = 100;
+// Add these globals for median safety logic
+const int SAFETY_HISTORY_LEN = 60; // 1 minute at 1s intervals
+bool safetyHistory[SAFETY_HISTORY_LEN];
+int safetyHistoryIdx = 0;
+unsigned long lastSafetySample = 0;
+unsigned long lastSafetyUpdate = 0;
+bool medianSafe = false;
 
-// --- MQTT message handler ---
-void weatherMessageHandler(String &topic, String &payload) {
-  lastWeatherJson = payload;
-  Serial.println("Weather updated from MQTT:");
-  Serial.println(lastWeatherJson);
-}
+// Add with other global variables
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long mqttReconnectInterval = 5000; // 5 seconds between reconnect attempts
+// Add these variables with your other globals
+unsigned long mqttFailedTime = 0;
+const unsigned long mqttResetTimeout = 180000; // 3 minutes in milliseconds
+
+// Serial connection monitoring variables
+unsigned long lastSerialActivity = 0;
+unsigned long lastSerialCheck = 0;
+bool serialWasConnected = false;
 
 void setup() {
   pinMode(A0, INPUT_PULLUP);
@@ -70,11 +74,8 @@ void setup() {
   // Initialize samples array
   for (int i = 0; i < NUM_SAMPLES; i++) samples[i] = 0;
 
-  loadWeatherParamsFromEEPROM();
-
   // --- MQTT setup ---
   mqttClient.begin(mqtt_broker, mqtt_port, net);
-  mqttClient.onMessage(weatherMessageHandler);
 
   Serial.print("Connecting to MQTT broker...");
   while (!mqttClient.connect("ArduSafeMon_R4wifi")) {
@@ -83,8 +84,6 @@ void setup() {
   }
   Serial.println("connected!");
 
-  mqttClient.subscribe(mqtt_topic);
-
   // Initialize the watchdog timer (8 second timeout)
   WDT.begin(8000); // 8000ms = 8s
   Serial.println("Watchdog timer enabled with 8000ms timeout");
@@ -92,31 +91,6 @@ void setup() {
   // Initialize serial monitoring
   lastSerialActivity = millis();
   serialWasConnected = false;
-}
-
-// --- Add this function to parse user input from the web form ---
-void handleSettingsUpdate(String req) {
-  int cloudsIdx = req.indexOf("maxClouds=");
-  int windIdx = req.indexOf("maxWind=");
-  int humidityIdx = req.indexOf("maxHumidity=");
-  if (cloudsIdx >= 0) {
-    int end = req.indexOf('&', cloudsIdx);
-    String val = req.substring(cloudsIdx + 10, end > 0 ? end : req.length());
-    maxClouds = val.toFloat();
-  }
-  if (windIdx >= 0) {
-    int end = req.indexOf('&', windIdx);
-    String val = req.substring(windIdx + 8, end > 0 ? end : req.length());
-    maxWind = val.toFloat();
-  }
-  if (humidityIdx >= 0) {
-    int end = req.indexOf('&', humidityIdx);
-    String val = req.substring(humidityIdx + 12, end > 0 ? end : req.length());
-    maxHumidity = val.toFloat();
-  }
-
-  // Save updated parameters to EEPROM
-  saveWeatherParamsToEEPROM();
 }
 
 // --- Update sendRootHtml to add the input boxes and form ---
@@ -180,19 +154,7 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
       display: block;
       letter-spacing: 0.02em;
     }
-    .a0val {
-      position: fixed;
-      left: 1em;
-      bottom: 1em;
-      font-size: 1em;
-      color: #bbb;
-      font-style: italic;
-      opacity: 0.8;
-      z-index: 10;
-      pointer-events: none;
-      user-select: none;
-    }
-    .weather {
+    .sensor-info {
       margin-top: 2em;
       padding: 1em;
       background: #222b;
@@ -202,48 +164,16 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
       display: inline-block;
       min-width: 220px;
     }
-    .weather-title {
+    .sensor-title {
       font-weight: bold;
       color: #ffd600;
       margin-bottom: 0.5em;
       font-size: 1.2em;
     }
-    .settings-form {
-      margin-top: 2em;
-      background: #333a;
-      padding: 1em 2em;
-      border-radius: 12px;
-      display: inline-block;
+    .a0val {
+      font-size: 1.2em;
       color: #fff;
-    }
-    .settings-form label {
-      display: inline-block;
-      min-width: 120px;
-      text-align: right;
-      margin-right: 0.5em;
-    }
-    .settings-form input[type="number"] {
-      width: 60px;
-      border-radius: 6px;
-      border: none;
-      padding: 0.2em 0.5em;
-      margin-bottom: 0.5em;
-      font-size: 1em;
-    }
-    .settings-form input[type="submit"] {
-      margin-top: 0.7em;
-      padding: 0.4em 1.2em;
-      border-radius: 8px;
-      border: none;
-      background: #ffd600;
-      color: #222;
-      font-weight: bold;
-      font-size: 1em;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .settings-form input[type="submit"]:hover {
-      background: #fff176;
+      margin: 0.5em 0;
     }
     @media (max-width: 500px) {
       .container { min-width: 0; padding: 1.2em 0.5em; }
@@ -275,71 +205,13 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
   sprintf(buf, "%02lu:%02lu:%02lu since power on", hours, minutes, seconds);
   html += String("<div class='timestamp'>Last updated: ") + buf + "</div>";
 
-  // Add averaged A0 value in small italics at bottom left
-  char a0buf[32];
-  sprintf(a0buf, "A0 avg: %.1f", averagedValue);
-  html += String("<div class='a0val'>") + a0buf + "</div>";
-
-  // --- Weather rendering ---
-  float cloudsVal = -1, windVal = -1, humidityVal = -1;
-  if (lastWeatherJson.length() > 0) {
-    // Try to extract simple fields from the JSON (not a full JSON parser)
-    String temp = "", humidity = "", desc = "", wind = "", clouds = "";
-    int tIdx = lastWeatherJson.indexOf("\"temperature\":");
-    if (tIdx > 0) temp = lastWeatherJson.substring(tIdx + 14, lastWeatherJson.indexOf(",", tIdx));
-    int hIdx = lastWeatherJson.indexOf("\"humidity\":");
-    if (hIdx > 0) {
-      humidity = lastWeatherJson.substring(hIdx + 11, lastWeatherJson.indexOf(",", hIdx));
-      humidityVal = humidity.toFloat();
-    }
-    int dIdx = lastWeatherJson.indexOf("\"weather\":");
-    if (dIdx > 0) {
-      int dq = lastWeatherJson.indexOf("\"", dIdx + 11);
-      int dq2 = lastWeatherJson.indexOf("\"", dq + 1);
-      int commaAfterDesc = lastWeatherJson.indexOf(",", dIdx);
-      if (dq > 0 && dq2 > dq && (commaAfterDesc == -1 || dq2 < commaAfterDesc)) {
-        desc = lastWeatherJson.substring(dq + 1, dq2);
-      }
-    }
-    int wIdx = lastWeatherJson.indexOf("\"wind_speed\":");
-    if (wIdx > 0) {
-      wind = lastWeatherJson.substring(wIdx + 13, lastWeatherJson.indexOf(",", wIdx));
-      wind.trim();
-      if (wind.endsWith("}")) {
-        wind.remove(wind.length() - 1);
-        wind.trim();
-      }
-      windVal = wind.toFloat();
-    }
-    int cIdx = lastWeatherJson.indexOf("\"clouds\":");
-    if (cIdx > 0) {
-      clouds = lastWeatherJson.substring(cIdx + 9, lastWeatherJson.indexOf(",", cIdx));
-      cloudsVal = clouds.toFloat();
-    }
-
-    html += "<div class='weather'>";
-    html += "<div class='weather-title'>Current Weather</div>";
-    if (temp.length() > 0) html += "Temperature: " + temp + " &deg;C<br>";
-    if (humidity.length() > 0) html += "Humidity: " + humidity + " %<br>";
-    if (desc.length() > 0) html += "Description: " + desc + "<br>";
-    if (wind.length() > 0) html += "Wind Speed: " + wind + " m/s<br>";
-    if (clouds.length() > 0) html += "Clouds: " + clouds + " %<br>";
-
-    html += "</div>";
-  } else {
-    html += "<div class='weather'><em>Weather data unavailable</em></div>";
-  }
-
-  // --- Settings form ---
-  html += "<form class='settings-form' method='GET'>";
-  html += "<div><label for='maxClouds'>Max Clouds (%)</label>";
-  html += "<input type='number' id='maxClouds' name='maxClouds' min='0' max='100' value='" + String(maxClouds, 0) + "'></div>";
-  html += "<div><label for='maxWind'>Max Wind (m/s)</label>";
-  html += "<input type='number' id='maxWind' name='maxWind' min='0' max='100' value='" + String(maxWind, 0) + "'></div>";
-  html += "<div><label for='maxHumidity'>Max Humidity (%)</label>";
-  html += "<input type='number' id='maxHumidity' name='maxHumidity' min='0' max='100' value='" + String(maxHumidity, 0) + "'></div>";
-  html += "<input type='submit' value='Update'>";
-  html += "</form>";
+  // Add sensor info
+  html += "<div class='sensor-info'>";
+  html += "<div class='sensor-title'>Rain Sensor</div>";
+  html += "<div class='a0val'>Current Value: " + String(averagedValue, 1) + "</div>";
+  html += "<div class='a0val'>Threshold: " + String(safeState, 1) + "</div>";
+  html += "<div style='font-size: 0.9em; color: #bbb; margin-top: 0.5em;'>Safe when value &lt; threshold</div>";
+  html += "</div>";
 
   html += "</div></body></html>";
 
@@ -349,42 +221,6 @@ void sendRootHtml(WiFiClient& client, bool isSafe) {
   client.println();
   client.println(html);
 }
-
-
-void saveWeatherParamsToEEPROM() {
-  EEPROM.put(0, maxClouds);
-  EEPROM.put(sizeof(float), maxWind);
-  EEPROM.put(2 * sizeof(float), maxHumidity);
-  // EEPROM.commit(); // Not needed on AVR/Uno R4, remove or comment out to fix error
-}
-
-void loadWeatherParamsFromEEPROM() {
-  EEPROM.get(0, maxClouds);
-  EEPROM.get(sizeof(float), maxWind);
-  EEPROM.get(2 * sizeof(float), maxHumidity);
-  // Optionally add range checks here
-}
-
-// Add these globals for median safety logic
-const int SAFETY_HISTORY_LEN = 60; // 1 minute at 1s intervals
-bool safetyHistory[SAFETY_HISTORY_LEN];
-int safetyHistoryIdx = 0;
-unsigned long lastSafetySample = 0;
-unsigned long lastSafetyUpdate = 0;
-bool medianSafe = false;
-
-// Add with other global variables
-unsigned long lastMqttReconnectAttempt = 0;
-const unsigned long mqttReconnectInterval = 5000; // 5 seconds between reconnect attempts
-// Add these variables with your other globals
-unsigned long mqttFailedTime = 0;
-const unsigned long mqttResetTimeout = 180000; // 3 minutes in milliseconds
-
-// Serial connection monitoring
-unsigned long lastSerialActivity = 0;
-const unsigned long serialTimeoutPeriod = 120000; // 2 minutes - if no serial activity, assume disconnected
-bool serialWasConnected = false;
-unsigned long lastSerialCheck = 0;
 
 void loop() {
   // Reset watchdog at start of loop
@@ -452,8 +288,8 @@ void loop() {
       Serial.print("MQTT disconnected, attempting reconnect... ");
       if (mqttClient.connect("ArduSafeMon_R4wifi")) {
         Serial.println("connected!");
-        mqttClient.subscribe(mqtt_topic); // re-subscribe after reconnect
         mqttFailedTime = 0; // Reset the failure timer on successful connection
+        mqttClient.subscribe("obsybox/weathersafety"); // re-subscribe after reconnect
       } else {
         Serial.print("failed, rc=");
         Serial.print(mqttClient.lastError());
@@ -479,66 +315,13 @@ void loop() {
     averagedValue = sum / (float)NUM_SAMPLES;
     WDT.refresh(); // Changed from WDT.reset()
   }
-  
-  // Weather data is now updated in lastWeatherJson by MQTT callback
-
-  // Parse weather values for safety check
-  float cloudsVal = 0, windVal = 0, humidityVal = 0;
-  if (lastWeatherJson.length() > 0) {
-    int hIdx = lastWeatherJson.indexOf("\"humidity\":");
-    if (hIdx > 0) {
-      String humidity = lastWeatherJson.substring(hIdx + 11, lastWeatherJson.indexOf(",", hIdx));
-      humidityVal = humidity.toFloat();
-    }
-    int wIdx = lastWeatherJson.indexOf("\"wind_speed\":");
-    if (wIdx > 0) {
-      String wind = lastWeatherJson.substring(wIdx + 13, lastWeatherJson.indexOf(",", wIdx));
-      wind.trim();
-      if (wind.endsWith("}")) {
-        wind.remove(wind.length() - 1);
-        wind.trim();
-      }
-      windVal = wind.toFloat();
-    }
-    int cIdx = lastWeatherJson.indexOf("\"clouds\":");
-    if (cIdx > 0) {
-      String clouds = lastWeatherJson.substring(cIdx + 9, lastWeatherJson.indexOf(",", cIdx));
-      cloudsVal = clouds.toFloat();
-    }
-  }
 
   // --- Poll safety state every second and store in history ---
   if (millis() - lastSafetySample >= 1000 || lastSafetySample == 0) {
     lastSafetySample = millis();
 
     bool isSafe = averagedValue < safeState;
-    // Serial.print("Current sensor value: ");
-    // Serial.print(averagedValue);
-    // Serial.print(", Safe state threshold: ");
-    // Serial.println(safeState);
     
-    if ((cloudsVal >= 0 && cloudsVal > maxClouds)) {
-      isSafe = false;
-      Serial.print("Clouds too high: Current=");
-      Serial.print(cloudsVal);
-      Serial.print(", Max=");
-      Serial.println(maxClouds);
-    }
-    if ((windVal >= 0 && windVal > maxWind)) {
-      isSafe = false;
-      Serial.print("Wind too high: Current=");
-      Serial.print(windVal);
-      Serial.print(", Max=");
-      Serial.println(maxWind);
-    }
-    if ((humidityVal >= 0 && humidityVal > maxHumidity)) {
-      isSafe = false;
-      Serial.print("Humidity too high: Current=");
-      Serial.print(humidityVal);
-      Serial.print(", Max=");
-      Serial.println(maxHumidity);
-    }
-
     safetyHistory[safetyHistoryIdx] = isSafe;
     safetyHistoryIdx = (safetyHistoryIdx + 1) % SAFETY_HISTORY_LEN;
   }
@@ -566,15 +349,11 @@ void loop() {
     Serial.println(medianSafe ? "true" : "false");
 
     // --- Publish safety status to MQTT ---
-    String reason = medianSafe ? "All conditions safe (median)" : "Unsafe (median)";
+    String reason = medianSafe ? "Rain sensor safe (median)" : "Rain detected (median)";
     String payload = "{\"safe\":";
     payload += medianSafe ? "true" : "false";
     payload += ",\"reason\":\"" + reason + "\"}";
-    bool pubResult = mqttClient.publish("obsybox/weathersafety", payload);
-    // Serial.print("Publishing to obsybox/weathersafety: ");
-    // Serial.println(payload);
-    // Serial.print("Publish result: ");
-    // Serial.println(pubResult ? "OK" : "FAILED");
+    mqttClient.publish(mqtt_topic_safety, payload);
   }
 
   // Reset watchdog before web server handling
@@ -592,13 +371,6 @@ void loop() {
         req += c;
         if (req.endsWith("\r\n\r\n")) break;
       }
-    }
-    // Serial.print("Request: ");
-    // Serial.println(req);
-
-    // Handle settings update from GET parameters
-    if (req.indexOf("GET /?") >= 0) {
-      handleSettingsUpdate(req);
     }
 
     // Serve root page for GET /
@@ -659,28 +431,6 @@ void loop() {
       Serial.print(" (threshold: ");
       Serial.print(safeState);
       Serial.println(")");
-      
-      if (lastWeatherJson.length() > 0) {
-        Serial.print("Clouds: ");
-        Serial.print(cloudsVal);
-        Serial.print("% (max: ");
-        Serial.print(maxClouds);
-        Serial.println("%)");
-        
-        Serial.print("Wind: ");
-        Serial.print(windVal);
-        Serial.print(" m/s (max: ");
-        Serial.print(maxWind);
-        Serial.println(" m/s)");
-        
-        Serial.print("Humidity: ");
-        Serial.print(humidityVal);
-        Serial.print("% (max: ");
-        Serial.print(maxHumidity);
-        Serial.println("%)");
-      } else {
-        Serial.println("No weather data available");
-      }
       
       Serial.print("Safety history: ");
       int safeCount = 0;
