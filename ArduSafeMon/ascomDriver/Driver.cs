@@ -164,81 +164,26 @@ namespace ASCOM.ArduSafeMon.SafetyMonitor
                 if (value)
                 {
                     connectedState = true;
-                    LogMessage("Connected Set", "Connecting to port " + comPort);
+                    LogMessage("Connected Set", "Connecting via SharedHardware");
                     
-                    if (string.IsNullOrEmpty(comPort))
-                    {
-                        throw new ASCOM.NotConnectedException("COM Port not configured. Please run Setup.");
-                    }
-
                     try
                     {
-                        serialPort.PortName = comPort;
-                        serialPort.Open();
-                        LogMessage("Connected Set", "Port opened, waiting for Arduino...");
-                        
-                        // Wait longer for Arduino to complete its loop cycle
-                        // (MQTT operations can slow down the loop)
-                        Thread.Sleep(5000);
-                        
-                        // Flush any initial data/debug output
-                        if (serialPort.BytesToRead > 0)
-                        {
-                            string initial = serialPort.ReadExisting();
-                            LogMessage("Connected Set", "Initial data: " + initial);
-                        }
-                        
-                        // Test communication with retries
-                        bool success = false;
-                        for (int attempt = 1; attempt <= 3; attempt++)
-                        {
-                            LogMessage("Connected Set", "Communication test attempt " + attempt);
-                            try
-                            {
-                                UpdateSafetyState();
-                                success = true;
-                                break;
-                            }
-                            catch (TimeoutException)
-                            {
-                                LogMessage("Connected Set", "Attempt " + attempt + " timed out");
-                                if (attempt < 3)
-                                {
-                                    Thread.Sleep(1000);
-                                }
-                            }
-                        }
-                        
-                        if (!success)
-                        {
-                            throw new TimeoutException("Arduino did not respond after 3 attempts");
-                        }
-                        
+                        SharedHardware.ComPort = comPort;
+                        SharedHardware.Connect();
                         LogMessage("Connected Set", "Connected successfully");
                     }
                     catch (Exception ex)
                     {
                         connectedState = false;
                         LogMessage("Connected Set", "Error: " + ex.Message);
-                        throw new ASCOM.NotConnectedException("Cannot connect to " + comPort + ": " + ex.Message);
+                        throw;
                     }
                 }
                 else
                 {
                     connectedState = false;
-                    LogMessage("Connected Set", "Disconnecting from port " + comPort);
-                    
-                    if (serialPort != null && serialPort.IsOpen)
-                    {
-                        try
-                        {
-                            serialPort.Close();
-                        }
-                        catch (Exception ex)
-                        {
-                            LogMessage("Connected Set", "Error closing port: " + ex.Message);
-                        }
-                    }
+                    LogMessage("Connected Set", "Disconnecting via SharedHardware");
+                    SharedHardware.Disconnect();
                 }
             }
         }
@@ -302,18 +247,10 @@ namespace ASCOM.ArduSafeMon.SafetyMonitor
             get
             {
                 CheckConnected("IsSafe");
-                
-                // Update state if more than 5 seconds old
-                if ((DateTime.Now - lastUpdateTime).TotalSeconds > 5)
-                {
-                    UpdateSafetyState();
-                }
-                
-                lock (safeLock)
-                {
-                    LogMessage("IsSafe Get", isSafe.ToString());
-                    return isSafe;
-                }
+                SharedHardware.UpdateSafetyState();
+                bool result = SharedHardware.IsSafe;
+                LogMessage("IsSafe Get", result.ToString());
+                return result;
             }
         }
 
@@ -326,10 +263,7 @@ namespace ASCOM.ArduSafeMon.SafetyMonitor
             get
             {
                 CheckConnected("RainSensorValue");
-                lock (safeLock)
-                {
-                    return rainSensorValue;
-                }
+                return SharedHardware.RainSensorValue;
             }
         }
 
@@ -342,10 +276,7 @@ namespace ASCOM.ArduSafeMon.SafetyMonitor
             get
             {
                 CheckConnected("UnsafeReason");
-                lock (safeLock)
-                {
-                    return unsafeReason;
-                }
+                return SharedHardware.UnsafeReason;
             }
         }
 
