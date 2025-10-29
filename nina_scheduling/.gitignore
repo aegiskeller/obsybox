@@ -8,3 +8,17 @@ observations.sqlite*
 __pycache__/
 .venv/
 pushover_secrets.py
+secrets.py
+*.html
+*.json
+*.csv
+*.backup
+*.log
+debug*
+*.bak2
+*.sqlite
+test_*
+venv
+LogArchive
+data_scan.py
+targets/

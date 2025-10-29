@@ -31,6 +31,8 @@ WiFiServer server(80);
 // Non-blocking MQTT reconnect variables
 unsigned long lastMqttReconnectAttempt = 0;
 const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
+unsigned long mqttFirstDisconnectTime = 0;
+const unsigned long mqttResetTimeout = 180000; // 3 minutes - reset if MQTT stuck
 
 // Sensor error flags
 bool tslSensorOk = false;
@@ -152,7 +154,53 @@ void serveClient(WiFiClient& client) {
     ahtHum = humidity.relative_humidity;
   }
 
-  // Serve main HTML page
+  // Check for API endpoints
+  if (req.indexOf("GET /lux") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(lux, 2);
+    return;
+  }
+  
+  if (req.indexOf("GET /sky") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(objTemp, 2);
+    return;
+  }
+  
+  if (req.indexOf("GET /ambient") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(ambTemp, 2);
+    return;
+  }
+  
+  if (req.indexOf("GET /aht_temp") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(ahtTemp, 2);
+    return;
+  }
+  
+  if (req.indexOf("GET /aht_humidity") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    client.println(ahtHum, 2);
+    return;
+  }
+
+  // Serve main HTML page for root path
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html");
   client.println("Connection: close");
@@ -201,7 +249,8 @@ void serveClient(WiFiClient& client) {
   client.println(R"rawliteral(
       </div>
       <div style="text-align:center;margin-top:2em;">
-        <small><em>Sensors: TSL2591 (lux), MLX90614 (sky/ambient temperature), AHT10 (temp/humidity)</em></small>
+        <small><em>Sensors: TSL2591 (lux), MLX90614 (sky/ambient temperature), AHT10 (temp/humidity)</em></small><br>
+        <small><em>API endpoints: /lux /sky /ambient /aht_temp /aht_humidity</em></small>
       </div>
     </body>
     </html>
@@ -217,12 +266,27 @@ void loop() {
   // Non-blocking MQTT reconnection
   if (!mqttClient.connected()) {
     unsigned long now = millis();
+    
+    // Track when MQTT first disconnected
+    if (mqttFirstDisconnectTime == 0) {
+      mqttFirstDisconnectTime = now;
+      Serial.println("MQTT disconnected - starting timeout timer");
+    }
+    
+    // Check if MQTT has been disconnected too long
+    if (now - mqttFirstDisconnectTime > mqttResetTimeout) {
+      Serial.println("MQTT stuck for more than 3 minutes. Forcing hardware reset...");
+      delay(1000); // Give serial time to send
+      NVIC_SystemReset(); // Force hardware reset
+    }
+    
     if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
       lastMqttReconnectAttempt = now;
       Serial.print("Attempting MQTT connection...");
       mqttClient.setId("OPIR_MKRWiFi");
       if (mqttClient.connect(mqtt_server, mqtt_port)) {
         Serial.println("connected");
+        mqttFirstDisconnectTime = 0; // Reset timeout timer on successful connection
       } else {
         Serial.print("failed, rc=");
         Serial.print(mqttClient.connectError());
@@ -230,6 +294,8 @@ void loop() {
       }
     }
   } else {
+    // MQTT is connected - reset the disconnect timer
+    mqttFirstDisconnectTime = 0;
     mqttClient.poll();
   }
   
@@ -309,12 +375,25 @@ void loop() {
       "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"ir\":%u,\"full\":%u,\"aht_temp\":%.2f,\"aht_hum\":%.2f}",
       lux, objTemp, ambTemp, ir, full, ahtTemp, ahtHum);
 
+    // Print sensor values to serial
+    Serial.println("--- Sensor Reading ---");
+    Serial.print("Lux: "); Serial.println(lux, 2);
+    Serial.print("Sky Temp: "); Serial.print(objTemp, 2); Serial.println(" °C");
+    Serial.print("Ambient Temp: "); Serial.print(ambTemp, 2); Serial.println(" °C");
+    Serial.print("IR: "); Serial.println(ir);
+    Serial.print("Full: "); Serial.println(full);
+    Serial.print("AHT10 Temp: "); Serial.print(ahtTemp, 2); Serial.println(" °C");
+    Serial.print("AHT10 Humidity: "); Serial.print(ahtHum, 2); Serial.println(" %");
+    Serial.println("----------------------");
+
     // Only publish if MQTT is connected
     if (mqttClient.connected()) {
       mqttClient.beginMessage(mqtt_topic);
       mqttClient.print(payload);
       mqttClient.endMessage();
       Serial.println("MQTT data published");
+    } else {
+      Serial.println("MQTT not connected - data not published");
     }
 
     lastMqttPublish = now;

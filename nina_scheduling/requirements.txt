@@ -3,3 +3,7 @@ astropy
 astroquery
 pandas
 requests
+beautifulsoup4
+selenium
+matplotlib
+pillow

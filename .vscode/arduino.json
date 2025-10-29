@@ -1,3 +1,7 @@
 {
+<<<<<<< HEAD
     "port": "COM20"
+=======
+    "port": "/dev/tty.usbserial-14310"
+>>>>>>> 60b6093 (frac)
 }

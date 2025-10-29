@@ -13,6 +13,9 @@ Behavior:
  - Before inserting, checks if (target,dateobs) already exists and skips to avoid duplicates
  - By default, target is the subdirectory name; trailing '_sub' and any suffix after it is stripped
  - Default telescopes: light -> 'SCT', seestar -> 'S50'
+
+example usage:
+
 """
 from pathlib import Path
 import argparse
