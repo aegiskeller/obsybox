@@ -169,9 +169,9 @@ This will:
 3. Select 2 optimal targets spaced throughout the night
 4. Generate CSV/JSON exports with all filtered and selected targets
 5. Create NINA sequence files for each selected target
-6. **Record targets in the database** with scheduled date and metadata
+6. **Note: Targets are NOT recorded in database** - use GUI for database tracking
 
-**Note**: The command-line version records targets immediately after generation. The GUI records targets only when you click "Export NINA JSON", allowing you to review targets before committing to the schedule.
+**Note**: The command-line version generates files only. The GUI records targets in the database when you click "Export NINA JSON", allowing you to review targets before committing to the schedule.
 
 ### Output Files
 
@@ -198,7 +198,7 @@ When targets are generated and exported, they are recorded in the database with:
 - Initially `observed_on` is NULL
 
 **GUI**: Targets are recorded when you click "💾 Export NINA JSON" (allows review before scheduling)
-**Command-line**: Targets are recorded immediately after generation
+**Command-line**: Targets are NOT recorded in database - use GUI for database tracking
 
 #### Importing Observations
 When you import NINA log files, the system:

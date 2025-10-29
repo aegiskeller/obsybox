@@ -812,13 +812,25 @@ class TargetSelectorGUI:
                         label=format_target_display_name(target),
                         alpha=0.8)
                 
-                # Mark scheduled start and end times (minima ± 2 hours)
+                # Mark scheduled start and end times (minima ± 2 hours) and minima time
                 if 'minima_datetime_local' in target:
                     minima_time = target['minima_datetime_local']
                     scheduled_start_time = minima_time - timedelta(hours=2)
                     scheduled_end_time = minima_time + timedelta(hours=2)
                     
-                    # Find closest time points for markers
+                    # Mark the exact minima time with orange marker
+                    if start_time <= minima_time <= end_time:
+                        # Find index of closest time for minima
+                        time_diffs = [abs((t - minima_time).total_seconds()) for t in time_array]
+                        closest_idx = time_diffs.index(min(time_diffs))
+                        
+                        if closest_idx < len(airmasses) and not np.isnan(airmasses[closest_idx]):
+                            ax1.plot(time_array[closest_idx], airmasses[closest_idx],
+                                    'o', color='orange', markersize=12, 
+                                    markeredgecolor='white', markeredgewidth=2,
+                                    zorder=11, label='_nolegend_')  # Don't add to legend
+                    
+                    # Find closest time points for start/end markers (red)
                     for marker_time in [scheduled_start_time, scheduled_end_time]:
                         if start_time <= marker_time <= end_time:
                             # Find index of closest time
@@ -829,7 +841,7 @@ class TargetSelectorGUI:
                                 ax1.plot(time_array[closest_idx], airmasses[closest_idx],
                                         'o', color='red', markersize=10, 
                                         markeredgecolor='white', markeredgewidth=2,
-                                        zorder=10)
+                                        zorder=10, label='_nolegend_')  # Don't add to legend
             
             except Exception as e:
                 self.log_message(f"Error plotting {target.get('name', 'unknown')}: {e}", 'warning')
@@ -860,10 +872,27 @@ class TargetSelectorGUI:
         ax1.spines['right'].set_color(COLORS['text_dim'])
         ax2.spines['right'].set_color(COLORS['text_dim'])
         
-        # Add legend
-        ax1.legend(loc='upper right', facecolor=COLORS['bg_light'], 
-                  edgecolor=COLORS['text_dim'], labelcolor=COLORS['text'],
-                  fontsize=9)
+        # Add legend with custom entries for markers
+        handles, labels = ax1.get_legend_handles_labels()
+        
+        # Add custom legend entries for markers
+        from matplotlib.lines import Line2D
+        custom_lines = [
+            Line2D([0], [0], marker='o', color='orange', linestyle='None',
+                   markersize=10, markeredgecolor='white', markeredgewidth=2,
+                   label='Minima Time'),
+            Line2D([0], [0], marker='o', color='red', linestyle='None',
+                   markersize=8, markeredgecolor='white', markeredgewidth=2,
+                   label='Observation Window')
+        ]
+        
+        # Combine target lines with marker explanations
+        all_handles = handles + custom_lines
+        all_labels = labels + ['Minima Time', 'Observation Window']
+        
+        ax1.legend(all_handles, all_labels, loc='upper right', 
+                  facecolor=COLORS['bg_light'], edgecolor=COLORS['text_dim'], 
+                  labelcolor=COLORS['text'], fontsize=9)
         
         # Add title
         fig.suptitle(f'Airmass Curves for {obs_date.strftime("%Y-%m-%d")}',

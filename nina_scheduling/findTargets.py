@@ -58,7 +58,12 @@ MIN_DECLINATION = -40  # Minimum declination in degrees
 MAX_DECLINATION = 0    # Maximum declination in degrees
 
 # NINA template configuration
-NINA_TEMPLATE_FILE = "G6432.00592.template.json"  # Template file for NINA JSON generation
+NINA_TEMPLATE_FILE = "C:\\Users\\aegis\\Documents\\N.I.N.A\\Templates\\varstarTemplate.template.json"  # Template file for NINA JSON generation
+# check if the template file exists
+if not Path(NINA_TEMPLATE_FILE).exists():
+    logger.error(f"NINA template file not found: {NINA_TEMPLATE_FILE}") 
+    # Handle the error (e.g., exit or use a default template)
+    sys.exit(1) 
 
 # Observation scheduling parameters
 OBSERVATION_WINDOW = 4  # Hours: total observation window per target
@@ -910,9 +915,13 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
     """
     Select optimal targets for the night based on timing and altitude constraints
     
+    Timing strategy:
+    - First target: minima at sun -15° altitude + 2 hours (allows 2hr pre-minima observation)
+    - Second target: minima 4 hours after first target
+    
     Args:
         targets: List of filtered target dictionaries
-        dark_sky_time: Dark sky start time as "HH:MM" string in LOCAL TIME (if None, will calculate for sun at -15°)
+        dark_sky_time: Dark sky time as "HH:MM" string in LOCAL TIME (if None, will calculate for sun at -15°)
         
     Returns:
         List of selected targets for the night (usually 2)
@@ -921,19 +930,25 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
     today = date.today()
     
     if dark_sky_time is None:
-        # Calculate when sun reaches -15° below horizon (dark enough for observations)
+        # Calculate when sun reaches -15° below horizon then add 2 hours for first target
         dark_sky_time = calculate_sunset_time(today, LATITUDE, LONGITUDE, sun_altitude=-15.0)
         logger.info(f"Calculated dark sky time (sun at -15°): {dark_sky_time} local")
+        
+        # First target should be dark sky + 2 hours
+        dark_sky_local = datetime.combine(today, datetime.strptime(dark_sky_time, "%H:%M").time())
+        first_target_local = dark_sky_local + timedelta(hours=2)
+    else:
+        # If dark_sky_time provided, add 2 hours for first target
+        dark_sky_local = datetime.combine(today, datetime.strptime(dark_sky_time, "%H:%M").time())
+        first_target_local = dark_sky_local + timedelta(hours=2)
     
     dark_sky_local = datetime.combine(today, datetime.strptime(dark_sky_time, "%H:%M").time())
-    
-    # First target should have minima ~2 hours after dark sky begins (local time)
-    # This ensures observations can start right at dark sky time (2hrs before minima)
-    first_target_local = dark_sky_local + timedelta(hours=2)
     # Convert to UTC for comparison with target times
     first_target_utc = local_to_utc(first_target_local)
     
-    logger.info(f"Dark sky begins at {dark_sky_local.strftime('%H:%M')} local")
+    logger.info(f"Dark sky time (sun at -15°) at {dark_sky_local.strftime('%H:%M')} local")
+    logger.info(f"First target minima should be at {first_target_local.strftime('%H:%M')} local (dark sky + 2hrs)")
+    logger.info(f"Second target minima should be at {(first_target_local + timedelta(hours=4)).strftime('%H:%M')} local (first + 4hrs)")
     logger.info(f"Looking for targets with minima around {first_target_local.strftime('%H:%M')} local time ({first_target_utc.strftime('%H:%M')} UTC)")
     
     selected_targets = []
@@ -1034,21 +1049,47 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
     attempts = 0
     max_attempts = 20  # Prevent infinite loops
     
-    while len(validated_targets) < MAX_TARGETS_PER_NIGHT and attempts < max_attempts:
-        attempts += 1
-        logger.info(f"Searching for replacement target {len(validated_targets) + 1} (attempt {attempts})...")
+    # Track which time slots are filled vs empty
+    target_slots = [None, None]  # [target1, target2] 
+    
+    # Fill existing validated targets into appropriate slots based on timing
+    for target in validated_targets:
+        target_hour = target['minima_datetime_utc'].hour + target['minima_datetime_utc'].minute / 60.0
+        first_target_hour = first_target_utc.hour + first_target_utc.minute / 60.0
+        second_target_hour = (first_target_hour + TARGET_SPACING) % 24
         
-        # Calculate target times based on how many we have
-        if len(validated_targets) == 0:
-            # Need first target - look ~2 hours after dark sky
-            target_time_utc = first_target_utc
-            search_window = 1.0  # hours
+        # Determine which slot this target belongs to
+        diff_to_first = abs(target_hour - first_target_hour)
+        if diff_to_first > 12: diff_to_first = 24 - diff_to_first
+        
+        diff_to_second = abs(target_hour - second_target_hour)
+        if diff_to_second > 12: diff_to_second = 24 - diff_to_second
+        
+        if diff_to_first <= diff_to_second:
+            target_slots[0] = target  # First target slot
         else:
-            # Need second target - look ~4 hours after first validated target
-            first_minima = validated_targets[0]['minima_datetime_utc']
-            target_time_hour = (first_minima.hour + first_minima.minute / 60.0 + TARGET_SPACING) % 24
-            search_window = 1.5  # hours (wider window for second target)
+            target_slots[1] = target  # Second target slot
+    
+    while len([slot for slot in target_slots if slot is not None]) < MAX_TARGETS_PER_NIGHT and attempts < max_attempts:
+        attempts += 1
+        
+        # Find which slot needs filling
+        if target_slots[0] is None:
+            slot_number = 1
+            target_time_utc = first_target_utc
+            search_window = 2.0  # hours (expanded from 1.0)
+            logger.info(f"Searching for replacement target {slot_number} (attempt {attempts})...")
+        elif target_slots[1] is None:
+            slot_number = 2
+            # Use first validated target's time + spacing
+            first_minima = target_slots[0]['minima_datetime_utc']
             target_time_utc = first_minima + timedelta(hours=TARGET_SPACING)
+            search_window = 3.0  # hours (expanded from 1.5 for wider second target search)
+            logger.info(f"Searching for replacement target {slot_number} (attempt {attempts})...")
+        else:
+            break  # Both slots filled
+        
+        logger.info(f"Searching in {search_window:.1f} hour window around {target_time_utc.strftime('%H:%M')} UTC")
         
         # Find candidates
         target_hour = target_time_utc.hour + target_time_utc.minute / 60.0
@@ -1056,7 +1097,7 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
         
         for target in valid_targets:
             # Skip already validated or rejected targets
-            if target['name'] in rejected_targets or target in validated_targets:
+            if target['name'] in rejected_targets or target in target_slots:
                 continue
             
             candidate_hour = target['minima_datetime_utc'].hour + target['minima_datetime_utc'].minute / 60.0
@@ -1072,8 +1113,11 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
                     candidates.append((target, time_diff))
         
         if not candidates:
-            logger.warning(f"No more candidate targets found in search window")
-            break
+            logger.warning(f"No more candidate targets found in search window of {search_window:.1f} hours")
+            # Expand search window for next attempt
+            search_window += 1.0
+            logger.info(f"Expanding search window to {search_window:.1f} hours for next attempt")
+            continue
         
         # Sort by time difference and try candidates in order
         candidates.sort(key=lambda x: x[1])
@@ -1082,8 +1126,8 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
         for candidate, time_diff in candidates:
             # Detailed check with coordinate lookup
             if check_altitude_during_observation(candidate, LATITUDE, LONGITUDE, skip_lookup=False):
-                validated_targets.append(candidate)
-                logger.info(f"Found replacement target: {candidate['name']} ({candidate.get('constellation', '')}) at {candidate['minima_datetime_local'].strftime('%H:%M')} local ({candidate['minimum_time']} UTC)")
+                target_slots[slot_number - 1] = candidate  # Assign to correct slot
+                logger.info(f"Found replacement target {slot_number}: {candidate['name']} ({candidate.get('constellation', '')}) at {candidate['minima_datetime_local'].strftime('%H:%M')} local ({candidate['minimum_time']} UTC)")
                 found_valid = True
                 break
             else:
@@ -1092,8 +1136,11 @@ def select_targets_for_night(targets: List[Dict], dark_sky_time: str = None) -> 
         
         if not found_valid:
             logger.warning(f"All candidate targets failed validation")
-            # Widen search window for next attempt
-            search_window += 0.5
+            # Widen search window for next attempt (more aggressive expansion)
+            search_window += 1.0  # Increased from 0.5 to 1.0 hours per attempt
+    
+    # Convert filled slots back to validated_targets list
+    validated_targets = [target for target in target_slots if target is not None]
     
     if len(validated_targets) < MAX_TARGETS_PER_NIGHT:
         logger.warning(f"Only found {len(validated_targets)} valid targets (wanted {MAX_TARGETS_PER_NIGHT})")
@@ -1678,27 +1725,32 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
     
     
 if __name__ == "__main__":
+    # Create targets output directory
+    targets_dir = Path(__file__).parent / "targets"
+    targets_dir.mkdir(exist_ok=True)
+    
     # Fetch all targets (will use cache if available for today)
     targets = fetch_minima_predictions(max_pages=None, use_cache=True)
     
     if targets:
-        # Export all filtered targets
-        export_to_nina_format(targets)
+        # Export all filtered targets to targets directory
+        all_targets_path = targets_dir / f"targets_{date.today()}.csv"
+        export_to_nina_format(targets, all_targets_path)
         
         # Select optimal targets for tonight
         logger.info("Selecting optimal targets for tonight...")
         selected = select_targets_for_night(targets)
         
         if selected:
-            # Export selected targets
-            selected_path = Path(__file__).parent / f"selected_targets_{date.today()}.csv"
+            # Export selected targets to targets directory
+            selected_path = targets_dir / f"selected_targets_{date.today()}.csv"
             export_to_nina_format(selected, selected_path)
             logger.info(f"Exported {len(selected)} selected targets for tonight")
             
-            # Export NINA JSON files
-            export_to_nina_json(selected)
+            # Export NINA JSON files to targets directory
+            export_to_nina_json(selected, output_dir=targets_dir)
             
-            # Record scheduled targets in database
-            record_scheduled_targets(selected, date.today())
+            logger.info("Note: Targets are not recorded in database when using command-line interface.")
+            logger.info("Use the GUI to record targets in the database upon export.")
         else:
             logger.warning("No suitable targets found for tonight")
