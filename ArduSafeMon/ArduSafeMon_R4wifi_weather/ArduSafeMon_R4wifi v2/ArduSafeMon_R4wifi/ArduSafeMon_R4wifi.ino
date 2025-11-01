@@ -23,6 +23,8 @@ float averagedValue = 0;
 const char* mqtt_broker = "192.168.1.49"; // Set your broker IP
 const int mqtt_port = 1883;
 const char* mqtt_topic_safety = "obsybox/weathersafety";
+// Publish averaged rain sensor value every minute to this topic
+const char* mqtt_topic_rain = "obsybox/rainsensor";
 WiFiClient net;
 MQTTClient mqttClient(512); // Smaller buffer since we only publish
 
@@ -354,6 +356,16 @@ void loop() {
     payload += medianSafe ? "true" : "false";
     payload += ",\"reason\":\"" + reason + "\"}";
     mqttClient.publish(mqtt_topic_safety, payload);
+    // Also publish averaged rain sensor value (JSON) every minute
+    if (mqttClient.connected()) {
+      // Create JSON payload: {"value":123.4,"units":"analog"}
+      String rainPayload = String("{\"value\":") + String(averagedValue, 1) + String(",\"units\":\"analog\"}");
+      mqttClient.publish(mqtt_topic_rain, rainPayload);
+      Serial.print("Published rain sensor JSON: ");
+      Serial.println(rainPayload);
+    } else {
+      Serial.println("Skipping rain publish, MQTT not connected");
+    }
   }
 
   // Reset watchdog before web server handling
