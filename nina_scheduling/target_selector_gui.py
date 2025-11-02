@@ -30,11 +30,35 @@ from findTargets import (
     export_to_nina_json,
     record_scheduled_targets,
     format_target_display_name,
-    LATITUDE, LONGITUDE, MAG_MIN, MAG_MAX, MIN_ALTITUDE,
-    ALLOWED_AZIMUTHS, MIN_DECLINATION, MAX_DECLINATION,
-    OBSERVATION_WINDOW, MIN_ALTITUDE_DURING_OBS, TARGET_SPACING,
-    CENTER_AFTER_DRIFT_ARCMIN, MAX_TARGETS_PER_NIGHT, TIMEZONE_OFFSET
+    NINA_EXPORT_BASE_DIR
 )
+
+# Import configuration management
+try:
+    from config import load_config, save_config, update_config_from_gui_values, get_flat_config
+    config = get_flat_config()
+    LATITUDE = config['LATITUDE']
+    LONGITUDE = config['LONGITUDE']
+    MAG_MIN = config['MAG_MIN']
+    MAG_MAX = config['MAG_MAX']
+    MIN_ALTITUDE = config['MIN_ALTITUDE']
+    MIN_ALTITUDE_DURING_OBS = config['MIN_ALTITUDE_DURING_OBS']
+    MIN_DECLINATION = config['MIN_DECLINATION']
+    MAX_DECLINATION = config['MAX_DECLINATION']
+    OBSERVATION_WINDOW = config['OBSERVATION_WINDOW']
+    TARGET_SPACING = config['TARGET_SPACING']
+    CENTER_AFTER_DRIFT_ARCMIN = config['CENTER_AFTER_DRIFT_ARCMIN']
+    MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
+    TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
+    ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+except ImportError:
+    # Fallback to importing from findTargets if config module not available
+    from findTargets import (
+        LATITUDE, LONGITUDE, MAG_MIN, MAG_MAX, MIN_ALTITUDE,
+        ALLOWED_AZIMUTHS, MIN_DECLINATION, MAX_DECLINATION,
+        OBSERVATION_WINDOW, MIN_ALTITUDE_DURING_OBS, TARGET_SPACING,
+        CENTER_AFTER_DRIFT_ARCMIN, MAX_TARGETS_PER_NIGHT, TIMEZONE_OFFSET
+    )
 
 # Midnight color scheme
 COLORS = {
@@ -71,8 +95,13 @@ class TargetSelectorGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("NINA Variable Star Target Selector")
-        self.root.geometry("900x700")
+        self.root.geometry("900x910")  # Increased height by 30% (700 → 910)
         self.root.configure(bg=COLORS['bg_dark'])
+        
+        # Initialize variables early (before creating UI components that reference them)
+        self.all_targets = []
+        self.selected_targets = []
+        self.observation_date = date.today()  # Current observation date
         
         # Progress animation variables
         self.progress_running = False
@@ -86,17 +115,32 @@ class TargetSelectorGUI:
         main_container = tk.Frame(root, bg=COLORS['bg_dark'])
         main_container.pack(fill='both', expand=True, padx=20, pady=20)
         
-        # Title
+        # Title row with logo and date
+        title_frame = tk.Frame(main_container, bg=COLORS['bg_dark'])
+        title_frame.pack(pady=(0, 5), fill='x')
+        
+        # Logo/Title (smaller, on the left)
         title_label = tk.Label(
-            main_container,
+            title_frame,
             text="〰️ Variable Star Target Selector",
-            font=('Helvetica', 20, 'bold'),
+            font=('Helvetica', 14, 'bold'),  # Reduced from 20 to 14 (30% smaller)
             bg=COLORS['bg_dark'],
             fg='#ff4444'
         )
-        title_label.pack(pady=(0, 5))
+        title_label.pack(side='left')
         
-        # Subtitle
+        # Current observation date (on the right)
+        self.main_date_label = tk.Label(
+            title_frame,
+            text=f"Obs Night: {self.observation_date.strftime('%Y-%m-%d')}",
+            font=('Helvetica', 12, 'bold'),
+            bg=COLORS['bg_dark'],
+            fg=COLORS['success'],  # Use green color to make it stand out
+            anchor='e'
+        )
+        self.main_date_label.pack(side='right', padx=(20, 0))
+        
+        # Subtitle (centered)
         subtitle_label = tk.Label(
             main_container,
             text="Designed for EB selection from Varastro.cz ephemera",
@@ -133,10 +177,6 @@ class TargetSelectorGUI:
             pady=5
         )
         self.status_label.pack(fill='x', pady=(10, 0))
-        
-        # Variables to store results
-        self.all_targets = []
-        self.selected_targets = []
         
     def setup_styles(self):
         """Configure ttk styles for midnight theme"""
@@ -248,9 +288,71 @@ class TargetSelectorGUI:
         # Azimuth settings card (checkboxes)
         self.create_azimuth_card(scrollable_frame)
         
-        # Generate button
+        # Date display and Generate button
         button_frame = tk.Frame(scrollable_frame, bg=COLORS['bg_dark'])
         button_frame.pack(fill='x', padx=20, pady=20)
+        
+        # Current date display with refresh button
+        date_frame = tk.Frame(button_frame, bg=COLORS['bg_dark'])
+        date_frame.pack(pady=(0, 10))
+        
+        self.date_label = tk.Label(
+            date_frame,
+            text=f"Target Date: {self.observation_date.strftime('%Y-%m-%d')}",
+            bg=COLORS['bg_dark'],
+            fg=COLORS['text'],
+            font=('Helvetica', 11, 'bold')
+        )
+        self.date_label.pack(side='left')
+        
+        # Small refresh button for date
+        refresh_date_button = tk.Button(
+            date_frame,
+            text="🔄",
+            command=self.refresh_date,
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            font=('Helvetica', 8),
+            relief='flat',
+            padx=5,
+            pady=2,
+            cursor='hand2'
+        )
+        refresh_date_button.pack(side='left', padx=(10, 0))
+        
+        # Reset to defaults button
+        reset_button = tk.Button(
+            button_frame,
+            text="⚙️ Reset Defaults",
+            command=self.reset_to_defaults,
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            font=('Helvetica', 10),
+            relief='flat',
+            padx=15,
+            pady=8,
+            cursor='hand2'
+        )
+        reset_button.pack(side='left', padx=(15, 0))
+        reset_button.bind('<Enter>', lambda e: reset_button.configure(bg=COLORS['accent_hover']))
+        reset_button.bind('<Leave>', lambda e: reset_button.configure(bg=COLORS['bg_medium']))
+        
+        # Clear cache button  
+        cache_button = tk.Button(
+            button_frame,
+            text="🗑️ Clear Cache",
+            command=self.clear_cache,
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            font=('Helvetica', 10),
+            relief='flat',
+            padx=15,
+            pady=8,
+            cursor='hand2'
+        )
+        cache_button.pack(side='left', padx=(15, 0))
+        cache_button.bind('<Enter>', lambda e: cache_button.configure(bg=COLORS['accent_hover']))
+        cache_button.bind('<Leave>', lambda e: cache_button.configure(bg=COLORS['bg_medium']))
         
         self.generate_button = tk.Button(
             button_frame,
@@ -264,7 +366,7 @@ class TargetSelectorGUI:
             pady=15,
             cursor='hand2'
         )
-        self.generate_button.pack()
+        self.generate_button.pack(side='right')
         
         # Bind hover effects
         self.generate_button.bind('<Enter>', lambda e: self.generate_button.configure(bg=COLORS['button_hover']))
@@ -439,6 +541,22 @@ class TargetSelectorGUI:
         )
         self.targets_text.pack(fill='both', expand=True, padx=20, pady=(0, 20))
         
+        # Export path info frame
+        export_info_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        export_info_frame.pack(fill='x', padx=20, pady=(0, 10))
+        
+        # Export path label
+        export_path_text = self.get_export_path_display()
+        self.export_path_label = tk.Label(
+            export_info_frame,
+            text=f"📁 Export Path: {export_path_text}",
+            bg=COLORS['bg_dark'],
+            fg=COLORS['text_dim'],
+            font=('Helvetica', 9),
+            anchor='w'
+        )
+        self.export_path_label.pack(fill='x')
+
         # Buttons frame
         buttons_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
         buttons_frame.pack(fill='x', padx=20, pady=(0, 20))
@@ -588,10 +706,115 @@ class TargetSelectorGUI:
             messagebox.showerror("Validation Error", str(e))
             return False
     
+    def refresh_date(self):
+        """Refresh the observation date to current date"""
+        self.observation_date = date.today()
+        # Update both date labels
+        self.date_label.config(text=f"Target Date: {self.observation_date.strftime('%Y-%m-%d')}")
+        self.main_date_label.config(text=f"Obs Night: {self.observation_date.strftime('%Y-%m-%d')}")
+        # Update export path display
+        self.update_export_path_display()
+        self.log_message(f"Date refreshed to {self.observation_date.strftime('%Y-%m-%d')}", 'info')
+    
+    def reset_to_defaults(self):
+        """Reset all parameters to default values"""
+        try:
+            from config import DEFAULT_CONFIG
+            
+            # Ask for confirmation
+            if not messagebox.askyesno("Reset to Defaults", 
+                                     "This will reset all parameters to their default values. Continue?"):
+                return
+            
+            # Reset values in GUI
+            self.entries['latitude'].delete(0, tk.END)
+            self.entries['latitude'].insert(0, str(DEFAULT_CONFIG['observer_location']['latitude']))
+            
+            self.entries['longitude'].delete(0, tk.END)
+            self.entries['longitude'].insert(0, str(DEFAULT_CONFIG['observer_location']['longitude']))
+            
+            self.entries['mag_min'].delete(0, tk.END)
+            self.entries['mag_min'].insert(0, str(DEFAULT_CONFIG['magnitude_limits']['mag_min']))
+            
+            self.entries['mag_max'].delete(0, tk.END)
+            self.entries['mag_max'].insert(0, str(DEFAULT_CONFIG['magnitude_limits']['mag_max']))
+            
+            self.entries['min_alt'].delete(0, tk.END)
+            self.entries['min_alt'].insert(0, str(DEFAULT_CONFIG['altitude_constraints']['min_altitude']))
+            
+            self.entries['min_alt_obs'].delete(0, tk.END)
+            self.entries['min_alt_obs'].insert(0, str(DEFAULT_CONFIG['altitude_constraints']['min_altitude_during_obs']))
+            
+            self.entries['min_dec'].delete(0, tk.END)
+            self.entries['min_dec'].insert(0, str(DEFAULT_CONFIG['declination_limits']['min_declination']))
+            
+            self.entries['max_dec'].delete(0, tk.END)
+            self.entries['max_dec'].insert(0, str(DEFAULT_CONFIG['declination_limits']['max_declination']))
+            
+            self.entries['obs_window'].delete(0, tk.END)
+            self.entries['obs_window'].insert(0, str(DEFAULT_CONFIG['timing_parameters']['observation_window']))
+            
+            self.entries['target_spacing'].delete(0, tk.END)
+            self.entries['target_spacing'].insert(0, str(DEFAULT_CONFIG['timing_parameters']['target_spacing']))
+            
+            self.entries['drift_tolerance'].delete(0, tk.END)
+            self.entries['drift_tolerance'].insert(0, str(DEFAULT_CONFIG['tracking_parameters']['center_after_drift_arcmin']))
+            
+            self.entries['max_targets'].delete(0, tk.END)
+            self.entries['max_targets'].insert(0, str(DEFAULT_CONFIG['timing_parameters']['max_targets_per_night']))
+            
+            self.entries['timezone'].delete(0, tk.END)
+            self.entries['timezone'].insert(0, str(DEFAULT_CONFIG['observer_location']['timezone_offset']))
+            
+            # Reset azimuth checkboxes
+            default_azimuths = DEFAULT_CONFIG['azimuth_preferences']['allowed_azimuths']
+            for az, var in self.azimuth_vars.items():
+                var.set(az in default_azimuths)
+            
+            self.log_message("All parameters reset to defaults", 'info')
+            
+        except ImportError:
+            messagebox.showerror("Error", "Configuration module not available")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset to defaults: {str(e)}")
+            self.log_message(f"Error resetting defaults: {str(e)}", 'error')
+    
+    def clear_cache(self):
+        """Clear all cached target data"""
+        try:
+            from pathlib import Path
+            cache_files = list(Path(__file__).parent.glob("cache_raw_targets_*.json"))
+            
+            if not cache_files:
+                self.log_message("No cache files found", 'info')
+                messagebox.showinfo("Cache", "No cache files found to clear")
+                return
+            
+            if messagebox.askyesno("Clear Cache", 
+                                 f"This will delete {len(cache_files)} cache file(s). Continue?"):
+                for cache_file in cache_files:
+                    cache_file.unlink()
+                    self.log_message(f"Deleted cache file: {cache_file.name}", 'info')
+                
+                self.log_message(f"Cleared {len(cache_files)} cache file(s)", 'success')
+                messagebox.showinfo("Cache", f"Successfully cleared {len(cache_files)} cache file(s)")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear cache: {str(e)}")
+            self.log_message(f"Error clearing cache: {str(e)}", 'error')
+    
     def generate_targets(self):
         """Generate targets based on current settings"""
         if not self.validate_inputs():
             return
+        
+        # Update the observation date to current date
+        self.observation_date = date.today()
+        # Update both date labels
+        self.date_label.config(text=f"Target Date: {self.observation_date.strftime('%Y-%m-%d')}")
+        self.main_date_label.config(text=f"Obs Night: {self.observation_date.strftime('%Y-%m-%d')}")
+        # Update export path display
+        self.update_export_path_display()
         
         # Disable button during generation
         self.generate_button.config(state='disabled', text="Generating...")
@@ -608,30 +831,54 @@ class TargetSelectorGUI:
         try:
             self.log_message("Starting target generation...", 'info')
             
+            # Collect current GUI values
+            gui_values = {
+                'latitude': float(self.entries['latitude'].get()),
+                'longitude': float(self.entries['longitude'].get()),
+                'mag_min': float(self.entries['mag_min'].get()),
+                'mag_max': float(self.entries['mag_max'].get()),
+                'min_altitude': float(self.entries['min_alt'].get()),
+                'min_altitude_during_obs': float(self.entries['min_alt_obs'].get()),
+                'min_declination': float(self.entries['min_dec'].get()),
+                'max_declination': float(self.entries['max_dec'].get()),
+                'observation_window': float(self.entries['obs_window'].get()),
+                'target_spacing': float(self.entries['target_spacing'].get()),
+                'max_targets_per_night': int(self.entries['max_targets'].get()),
+                'allowed_azimuths': [az for az, var in self.azimuth_vars.items() if var.get()]
+            }
+            
+            # Save configuration to persistent storage
+            try:
+                from config import update_config_from_gui_values
+                if update_config_from_gui_values(gui_values):
+                    self.log_message("Configuration saved", 'info')
+                else:
+                    self.log_message("Warning: Could not save configuration", 'warning')
+            except ImportError:
+                self.log_message("Warning: Config module not available", 'warning')
+            
             # Update global variables with user settings
             import findTargets
-            findTargets.LATITUDE = float(self.entries['latitude'].get())
-            findTargets.LONGITUDE = float(self.entries['longitude'].get())
-            findTargets.MAG_MIN = float(self.entries['mag_min'].get())
-            findTargets.MAG_MAX = float(self.entries['mag_max'].get())
-            findTargets.MIN_ALTITUDE = float(self.entries['min_alt'].get())
-            findTargets.MIN_ALTITUDE_DURING_OBS = float(self.entries['min_alt_obs'].get())
-            findTargets.MIN_DECLINATION = float(self.entries['min_dec'].get())
-            findTargets.MAX_DECLINATION = float(self.entries['max_dec'].get())
-            findTargets.OBSERVATION_WINDOW = float(self.entries['obs_window'].get())
-            findTargets.TARGET_SPACING = float(self.entries['target_spacing'].get())
+            findTargets.LATITUDE = gui_values['latitude']
+            findTargets.LONGITUDE = gui_values['longitude']
+            findTargets.MAG_MIN = gui_values['mag_min']
+            findTargets.MAG_MAX = gui_values['mag_max']
+            findTargets.MIN_ALTITUDE = gui_values['min_altitude']
+            findTargets.MIN_ALTITUDE_DURING_OBS = gui_values['min_altitude_during_obs']
+            findTargets.MIN_DECLINATION = gui_values['min_declination']
+            findTargets.MAX_DECLINATION = gui_values['max_declination']
+            findTargets.OBSERVATION_WINDOW = gui_values['observation_window']
+            findTargets.TARGET_SPACING = gui_values['target_spacing']
             findTargets.CENTER_AFTER_DRIFT_ARCMIN = float(self.entries['drift_tolerance'].get())
-            findTargets.MAX_TARGETS_PER_NIGHT = int(self.entries['max_targets'].get())
+            findTargets.MAX_TARGETS_PER_NIGHT = gui_values['max_targets_per_night']
             findTargets.TIMEZONE_OFFSET = int(self.entries['timezone'].get())
-            findTargets.ALLOWED_AZIMUTHS = [az for az, var in self.azimuth_vars.items() if var.get()]
+            findTargets.ALLOWED_AZIMUTHS = gui_values['allowed_azimuths']
             
             self.log_message(f"Configuration: Lat={findTargets.LATITUDE}, Lon={findTargets.LONGITUDE}", 'info')
             
             # Fetch predictions
-            from datetime import date
-            obs_date = date.today()
-            self.log_message(f"Fetching predictions for observation date: {obs_date.strftime('%Y-%m-%d')}", 'info')
-            self.all_targets = fetch_minima_predictions(use_cache=True)
+            self.log_message(f"Fetching predictions for observation date: {self.observation_date.strftime('%Y-%m-%d')}", 'info')
+            self.all_targets = fetch_minima_predictions(obs_date=self.observation_date, use_cache=True)
             
             # Stop progress animation after fetch completes
             self.root.after(0, self.stop_progress_animation)
@@ -681,7 +928,8 @@ class TargetSelectorGUI:
         
         # Header
         self.targets_text.insert('end', "=" * 80 + "\n")
-        self.targets_text.insert('end', f"  SELECTED TARGETS FOR {date.today().strftime('%Y-%m-%d')}\n")
+        self.targets_text.insert('end', f"  TARGETS FOR OBSERVATION NIGHT {self.observation_date.strftime('%Y-%m-%d')}\n")
+        self.targets_text.insert('end', f"  (Night of {self.observation_date.strftime('%b %d')} into {(self.observation_date + timedelta(days=1)).strftime('%b %d')})\n")
         self.targets_text.insert('end', "=" * 80 + "\n\n")
         
         # Target details
@@ -743,8 +991,7 @@ class TargetSelectorGUI:
         )
         
         # Generate time array for the night (sunset to sunrise, roughly 18:00 to 06:00 local)
-        obs_date = date.today()
-        start_time = datetime.combine(obs_date, datetime.min.time()) + timedelta(hours=18)
+        start_time = datetime.combine(self.observation_date, datetime.min.time()) + timedelta(hours=18)
         end_time = start_time + timedelta(hours=12)
         
         time_array = []
@@ -895,7 +1142,7 @@ class TargetSelectorGUI:
                   labelcolor=COLORS['text'], fontsize=9)
         
         # Add title
-        fig.suptitle(f'Airmass Curves for {obs_date.strftime("%Y-%m-%d")}',
+        fig.suptitle(f'Airmass Curves for {self.observation_date.strftime("%Y-%m-%d")}',
                     color=COLORS['text'], fontsize=13, fontweight='bold')
         
         fig.tight_layout()
@@ -976,6 +1223,20 @@ class TargetSelectorGUI:
         
         fig.canvas.mpl_connect("motion_notify_event", hover)
     
+    def get_export_path_display(self):
+        """Get the current export path for display in the GUI"""
+        from datetime import date
+        today = date.today()
+        date_str = today.strftime('%Y%m%d')
+        full_path = Path(NINA_EXPORT_BASE_DIR) / date_str
+        return str(full_path)
+    
+    def update_export_path_display(self):
+        """Update the export path label with current date"""
+        if hasattr(self, 'export_path_label'):
+            export_path_text = self.get_export_path_display()
+            self.export_path_label.config(text=f"📁 Export Path: {export_path_text}")
+    
     def export_nina_json(self):
         """Export selected targets as NINA JSON files"""
         if not self.selected_targets:
@@ -984,11 +1245,10 @@ class TargetSelectorGUI:
         
         try:
             # Record targets in database before exporting
-            obs_date = date.today()
-            self.log_message(f"Recording {len(self.selected_targets)} targets in database for {obs_date}...", 'info')
+            self.log_message(f"Recording {len(self.selected_targets)} targets in database for {self.observation_date}...", 'info')
             
             try:
-                record_scheduled_targets(self.selected_targets, obs_date)
+                record_scheduled_targets(self.selected_targets, self.observation_date)
                 self.log_message(f"Recorded targets in database", 'success')
             except Exception as e:
                 self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
@@ -996,11 +1256,17 @@ class TargetSelectorGUI:
             
             # Export NINA JSON files
             export_to_nina_json(self.selected_targets)
-            self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files", 'success')
+            
+            # Get the output directory for the success message
+            today = date.today()
+            date_str = today.strftime('%Y%m%d')
+            output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+            
+            self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
             messagebox.showinfo(
                 "Export Successful",
                 f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
-                f"{Path.cwd()}\n\n"
+                f"{output_dir}\n\n"
                 f"Targets have been recorded in the database."
             )
         except Exception as e:
@@ -1014,7 +1280,7 @@ class TargetSelectorGUI:
             return
         
         try:
-            output_path = Path.cwd() / f"selected_targets_{date.today()}.csv"
+            output_path = Path.cwd() / f"selected_targets_{self.observation_date}.csv"
             export_to_nina_format(self.selected_targets, output_path)
             self.log_message(f"Exported CSV to {output_path}", 'success')
             messagebox.showinfo(

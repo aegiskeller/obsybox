@@ -44,18 +44,48 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# User configuration
-LATITUDE = -35
-LONGITUDE = 150
+# Load configuration from persistent storage
+try:
+    from config import get_flat_config
+    config = get_flat_config()
+    LATITUDE = config['LATITUDE']
+    LONGITUDE = config['LONGITUDE']
+    MAG_MIN = config['MAG_MIN']
+    MAG_MAX = config['MAG_MAX']
+    MIN_ALTITUDE = config['MIN_ALTITUDE']
+    MIN_ALTITUDE_DURING_OBS = config['MIN_ALTITUDE_DURING_OBS']
+    MIN_DECLINATION = config['MIN_DECLINATION']
+    MAX_DECLINATION = config['MAX_DECLINATION']
+    OBSERVATION_WINDOW = config['OBSERVATION_WINDOW']
+    TARGET_SPACING = config['TARGET_SPACING']
+    CENTER_AFTER_DRIFT_ARCMIN = config['CENTER_AFTER_DRIFT_ARCMIN']
+    MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
+    TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
+    ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+    NINA_EXPORT_BASE_DIR = config['NINA_EXPORT_BASE_DIR']
+except ImportError:
+    logger.warning("Config module not found, using hardcoded defaults")
+    # Fallback to hardcoded values
+    LATITUDE = -35
+    LONGITUDE = 149.08
+    MAG_MIN = 10
+    MAG_MAX = 12.5
+    MIN_ALTITUDE = 45
+    MIN_ALTITUDE_DURING_OBS = 30
+    MIN_DECLINATION = -40
+    MAX_DECLINATION = 0
+    OBSERVATION_WINDOW = 4
+    TARGET_SPACING = 4
+    CENTER_AFTER_DRIFT_ARCMIN = 1.5
+    MAX_TARGETS_PER_NIGHT = 2
+    TIMEZONE_OFFSET = 10
+    ALLOWED_AZIMUTHS = ['N', 'NE', 'NW', 'E', 'W']
+    NINA_EXPORT_BASE_DIR = r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
+
+# Web scraping configuration
 BASE_URL = "https://var.astro.cz/en/Stars/MinimaPredictions"
 USERNAME = VARASTRO_USERNAME
 PASSWORD = VARASTRO_PASSWORD
-MAG_MIN = 10
-MAG_MAX = 12.5  # Expanded back to original range
-MIN_ALTITUDE = 45  # Minimum elevation at minima in degrees
-ALLOWED_AZIMUTHS = ['N', 'NE', 'NW', 'E', 'W']  # Allowed azimuth directions
-MIN_DECLINATION = -40  # Minimum declination in degrees
-MAX_DECLINATION = 0    # Maximum declination in degrees
 
 # NINA template configuration
 NINA_TEMPLATE_FILE = "C:\\Users\\aegis\\Documents\\N.I.N.A\\Templates\\varstarTemplate.template.json"  # Template file for NINA JSON generation
@@ -65,14 +95,8 @@ if not Path(NINA_TEMPLATE_FILE).exists():
     # Handle the error (e.g., exit or use a default template)
     sys.exit(1) 
 
-# Observation scheduling parameters
-OBSERVATION_WINDOW = 4  # Hours: total observation window per target
-MIN_ALTITUDE_DURING_OBS = 30  # Minimum altitude during observation window
-TARGET_SPACING = OBSERVATION_WINDOW  # Hours between target minima (same as observation window)
-CENTER_AFTER_DRIFT_ARCMIN = 1.5  # Drift tolerance in arcminutes
+# Fixed parameters (not user-configurable)
 SUNSET_TIME = "20:00"  # Default sunset time LOCAL TIME
-MAX_TARGETS_PER_NIGHT = 2  # Usually only 2 targets fit per night
-TIMEZONE_OFFSET = 10  # Hours ahead of UTC (UTC+10 for longitude 150°E)
 
 def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_cache: bool = True) -> List[Dict]:
     """
@@ -88,13 +112,10 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
     """
     if obs_date is None:
         obs_date = date.today()
-        # If it's early morning (before 6am), we're still observing "last night"
-        # Otherwise, we're planning for tonight
-        current_hour = datetime.now().hour
-        if current_hour >= 6:
-            # After 6am, plan for tonight (which means next calendar day's early morning)
-            obs_date = obs_date
-        # else: before 6am, keep today's date (we're still in "last night")
+    
+    # Use the observation date directly - this is what goes in the website's date box
+    # For observation night 2025-11-02, we want to request 2025-11-02 from the website
+    logger.info(f"Using observation date {obs_date} for predictions request")
     
     # Check for cached data
     cache_file = Path(__file__).parent / f"cache_raw_targets_{obs_date}.json"
@@ -104,10 +125,15 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
             targets = json.load(f)
         logger.info(f"Loaded {len(targets)} targets from cache")
         
-        # Apply filters to cached data
+        # Apply basic filters to cached data
         filtered_targets = apply_filters(targets)
-        logger.info(f"After applying filters: {len(filtered_targets)} targets remain")
-        return filtered_targets
+        logger.info(f"After applying basic filters: {len(filtered_targets)} targets remain")
+        
+        # Apply observation night filtering with correct timezone handling
+        night_filtered_targets = filter_targets_by_observation_night(filtered_targets, obs_date)
+        logger.info(f"After observation night filtering: {len(night_filtered_targets)} targets remain")
+        
+        return night_filtered_targets
     
     # Setup Chrome options
     chrome_options = Options()
@@ -144,19 +170,125 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         logger.info("Login successful")
         
         # Navigate to predictions page with initial parameters
+        # Use YYYY-MM-DD format to match what the website's date field expects
         pred_url = (f"https://var.astro.cz/en/Stars/MinimaPredictions?init=1"
                    f"&obsLat={LATITUDE}&obsLong={LONGITUDE}"
                    f"&date={obs_date.strftime('%Y-%m-%d')}"
                    f"&showVisibleEventsOnly=true")
+        logger.info(f"Requesting predictions for date: {obs_date.strftime('%Y-%m-%d')} (YYYY-MM-DD format)")
+        logger.info(f"URL: {pred_url}")
         driver.get(pred_url)
         logger.info(f"Loading predictions page for {obs_date}...")
         
-        # Wait for page to load
+        # Wait for page to load but NOT for the table yet - we need to set the date first
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+        
+        # CRITICAL: Set the date field IMMEDIATELY after page load and BEFORE applying other filters
+        try:
+            # The correct date field is 'pred-date' - use JavaScript to set it directly
+            date_set = False
+            # Use DD/MM/YYYY format as expected by the website (e.g., "02/11/2025" for Nov 2, 2025)
+            target_date = obs_date.strftime('%d/%m/%Y')
+            
+            try:
+                # First, check current value and field attributes
+                inspection_script = """
+                var dateField = document.getElementById('pred-date');
+                if (dateField) {
+                    return {
+                        value: dateField.value,
+                        type: dateField.type,
+                        pattern: dateField.pattern || 'none',
+                        placeholder: dateField.placeholder || 'none',
+                        className: dateField.className,
+                        required: dateField.required
+                    };
+                } else {
+                    return 'NOT_FOUND';
+                }
+                """
+                field_info = driver.execute_script(inspection_script)
+                logger.info(f"Date field info: {field_info}")
+                
+                # Based on current value '2025-11-01', the field expects YYYY-MM-DD format!
+                formats_to_try = [
+                    obs_date.strftime('%Y-%m-%d'),  # YYYY-MM-DD (2025-11-02) - matches field format
+                    obs_date.strftime('%d/%m/%Y'),  # DD/MM/YYYY (02/11/2025) - fallback
+                    obs_date.strftime('%m/%d/%Y'),  # MM/DD/YYYY (11/02/2025) - fallback
+                ]
+                
+                logger.info(f"Will try date formats: {formats_to_try}")
+                
+                for i, date_format in enumerate(formats_to_try):
+                    script = f"""
+                    var dateField = document.getElementById('pred-date');
+                    if (dateField) {{
+                        dateField.value = '{date_format}';
+                        dateField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        dateField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        return dateField.value;
+                    }} else {{
+                        return 'NOT_FOUND';
+                    }}
+                    """
+                    
+                    new_value = driver.execute_script(script)
+                    logger.info(f"Attempt {i+1}: Set date to '{date_format}', field now shows: '{new_value}'")
+                    
+                    if new_value == date_format:
+                        date_set = True
+                        target_date = date_format  # Update for logging
+                        logger.info(f"✅ Date field successfully set with format {i+1}: {date_format}")
+                        break
+                    elif new_value == 'NOT_FOUND':
+                        logger.error("❌ Date field 'pred-date' not found!")
+                        break
+                
+                if not date_set:
+                    logger.warning(f"⚠️  All date format attempts failed. Field value remains: '{new_value}'")
+                
+                # Also trigger form submission or page reload to ensure changes take effect
+                if date_set:
+                    logger.info("Triggering form update...")
+                    driver.execute_script("""
+                        // Look for and click a submit or update button
+                        var submitButton = document.querySelector('button[type="submit"]') || 
+                                         document.querySelector('input[type="submit"]') ||
+                                         document.querySelector('button:contains("Update")') ||
+                                         document.querySelector('button:contains("Search")');
+                        if (submitButton) {
+                            submitButton.click();
+                        } else {
+                            // Trigger a form event to update the table
+                            var form = document.querySelector('form');
+                            if (form) {
+                                form.dispatchEvent(new Event('submit', { bubbles: true }));
+                            }
+                        }
+                    """)
+                    
+            except Exception as e:
+                logger.error(f"Failed to set date field using JavaScript: {e}")
+            
+            if not date_set:
+                logger.error(f"❌ FAILED to set date field! This will result in wrong targets (yesterday's data)!")
+                logger.error(f"Expected date: {target_date}")
+            
+            # Wait longer for table to reload after date change
+            import time
+            time.sleep(8)  # Increased wait time for form submission/page reload
+            
+        except Exception as e:
+            logger.error(f"Error setting date field: {e}")
+        
+        # Now wait for the table to be present (should have correct date now)
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.ID, "minima-pred-table"))
         )
         
-        # Fill in filter fields directly
+        # Fill in other filter fields (date is already set above)
         try:
             # Magnitude max filter
             mag_max_input = driver.find_element(By.ID, "fMagMax")
@@ -179,7 +311,7 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
             azimuth_filter = ','.join(ALLOWED_AZIMUTHS)
             azimuth_input.send_keys(azimuth_filter)
             
-            logger.info(f"Applied filters: mag {MAG_MIN}-{MAG_MAX}, alt >{MIN_ALTITUDE}°, azimuth={azimuth_filter}")
+            logger.info(f"Applied filters: date={obs_date.strftime('%Y-%m-%d')}, mag {MAG_MIN}-{MAG_MAX}, alt >{MIN_ALTITUDE}°, azimuth={azimuth_filter}")
             
             # Press Enter to apply filters
             from selenium.webdriver.common.keys import Keys
@@ -361,9 +493,13 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         
         # Apply post-processing filters
         filtered_targets = apply_filters(targets)
-        logger.info(f"After applying filters: {len(filtered_targets)} targets remain")
+        logger.info(f"After applying basic filters: {len(filtered_targets)} targets remain")
         
-        return filtered_targets
+        # Apply observation night filtering with correct timezone handling
+        night_filtered_targets = filter_targets_by_observation_night(filtered_targets, obs_date)
+        logger.info(f"After observation night filtering: {len(night_filtered_targets)} targets remain")
+        
+        return night_filtered_targets
         
     except Exception as e:
         logger.error(f"Error fetching data with Selenium: {e}")
@@ -458,7 +594,60 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
     
     return filtered
 
-    return filtered
+def filter_targets_by_observation_night(targets: List[Dict], observation_date: date) -> List[Dict]:
+    """
+    Filter targets to only include those with minima occurring during the observation night.
+    Observation nights run from noon of observation_date to noon of the next day.
+    
+    Args:
+        targets: List of target dictionaries with minima times
+        observation_date: Date representing the observation night (noon-to-noon)
+    
+    Returns:
+        Filtered list of targets with minima during the observation night
+    """
+    # Observation night runs from noon LOCAL TIME of observation_date to noon LOCAL TIME of next day
+    # Convert to UTC for comparison with target minima times
+    
+    # Noon local time on observation_date
+    noon_local = datetime.combine(observation_date, datetime.min.time()) + timedelta(hours=12)
+    night_start_utc = local_to_utc(noon_local)
+    
+    # Noon local time on next day  
+    next_day = observation_date + timedelta(days=1)
+    noon_next_local = datetime.combine(next_day, datetime.min.time()) + timedelta(hours=12)
+    night_end_utc = local_to_utc(noon_next_local)
+    
+    logger.info(f"Filtering targets for observation night: {observation_date}")
+    logger.info(f"Night window (LOCAL): {noon_local.strftime('%Y-%m-%d %H:%M')} to {noon_next_local.strftime('%Y-%m-%d %H:%M')}")
+    logger.info(f"Night window (UTC):   {night_start_utc.strftime('%Y-%m-%d %H:%M')} to {night_end_utc.strftime('%Y-%m-%d %H:%M')}")
+    
+    filtered_targets = []
+    
+    for target in targets:
+        try:
+            # Parse the minima time (expecting format: "MM/DD/YY, HH:MM" in UTC)
+            minima_str = target.get('minimum_time', '')
+            if not minima_str:
+                continue
+                
+            minima_utc = parse_minima_time(minima_str)
+            if not minima_utc:
+                continue
+            
+            # Check if minima falls within the observation night window (all times in UTC)
+            if night_start_utc <= minima_utc <= night_end_utc:
+                filtered_targets.append(target)
+                logger.debug(f"Target {target.get('name', 'Unknown')} minima at {minima_str} UTC - INCLUDED")
+            else:
+                logger.debug(f"Target {target.get('name', 'Unknown')} minima at {minima_str} UTC - EXCLUDED (outside night window)")
+                
+        except (ValueError, KeyError) as e:
+            logger.debug(f"Warning: Could not parse minima time for target {target.get('name', 'Unknown')}: {e}")
+            continue
+    
+    logger.info(f"Filtered to {len(filtered_targets)} targets with minima during observation night")
+    return filtered_targets
 
 def parse_minima_time(time_str: str) -> datetime:
     """
@@ -1290,11 +1479,18 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     
     Args:
         targets: List of target dictionaries
-        output_dir: Directory to save the JSON files (default: same as script)
+        output_dir: Directory to save the JSON files (default: NINA VarStars directory with date)
         template_file: Path to template JSON file (default: NINA_TEMPLATE_FILE config)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent
+        # Create date-based directory structure using configurable base path
+        today = date.today()
+        date_str = today.strftime('%Y%m%d')  # Format: 20251102
+        output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+        
+        # Create the directory if it doesn't exist
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created output directory: {output_dir}")
     
     if template_file is None:
         template_file = NINA_TEMPLATE_FILE
@@ -1409,15 +1605,15 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 else 0
         dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 else 0.0
         
-        # Parse minima time to get observation start time (2 hours before minima)
+        # Parse minima time to get observation start and end times
         minima_datetime = target.get('minima_datetime_local')
         if minima_datetime:
             # Start 2 hours before minima
             start_time = minima_datetime - timedelta(hours=2)
             start_hours = start_time.hour
             start_minutes = start_time.minute
-            # End OBSERVATION_WINDOW hours after start
-            end_time = start_time + timedelta(hours=OBSERVATION_WINDOW)
+            # End 2 hours AFTER minima (not start + fixed window)
+            end_time = minima_datetime + timedelta(hours=2)
             end_hours = end_time.hour
             end_minutes = end_time.minute
         else:
@@ -1460,19 +1656,28 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_coordinates(item, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s)
         
-        # Helper function to update time condition
-        def update_time_condition(obj, hours, minutes):
-            """Recursively find and update TimeCondition in the JSON structure"""
+        # Helper function to update START time condition (in Target Imaging Instructions container)
+        def update_start_time_condition(obj, hours, minutes):
+            """Find and update TimeCondition in SequentialContainer for start time"""
             if isinstance(obj, dict):
-                if obj.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
-                    obj["Hours"] = hours
-                    obj["Minutes"] = minutes
+                # Look for SequentialContainer with name "Target Imaging Instructions"
+                if (obj.get("$type") == "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer" and 
+                    obj.get("Name") == "Target Imaging Instructions"):
+                    conditions = obj.get("Conditions", {})
+                    values = conditions.get("$values", [])
+                    
+                    # Update TimeCondition in this container
+                    for condition in values:
+                        if condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
+                            condition["Hours"] = hours
+                            condition["Minutes"] = minutes
+                            logger.debug(f"Set start time condition: {hours:02d}:{minutes:02d}")
                 else:
                     for value in obj.values():
-                        update_time_condition(value, hours, minutes)
+                        update_start_time_condition(value, hours, minutes)
             elif isinstance(obj, list):
                 for item in obj:
-                    update_time_condition(item, hours, minutes)
+                    update_start_time_condition(item, hours, minutes)
         
         # Helper function to update exposure time
         def update_exposure_time(obj, exp_time):
@@ -1487,25 +1692,50 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_exposure_time(item, exp_time)
         
-        # Helper function to update loop condition to time-based
+        # Helper function to update loop condition and add time-based end condition
         def update_loop_until_time(obj, end_hours, end_minutes):
             """
-            Update LoopCondition to 1 iteration - SmartExposure will run once per loop cycle.
-            The loop repeats based on the observation window timing.
+            Update LoopCondition to 1 iteration and add TimeCondition to SmartExposure 
+            conditions ONLY (not modifying existing TimeConditions elsewhere).
             """
             if isinstance(obj, dict):
-                # Look for LoopCondition within SmartExposure
+                # Look for SmartExposure specifically
                 if obj.get("$type") == "NINA.Sequencer.SequenceItem.Imaging.SmartExposure, NINA.Sequencer":
                     # Found SmartExposure, now look for its Conditions
                     conditions = obj.get("Conditions", {})
                     values = conditions.get("$values", [])
+                    
                     # Find and update the LoopCondition
                     for condition in values:
                         if condition.get("$type") == "NINA.Sequencer.Conditions.LoopCondition, NINA.Sequencer":
                             # Set to 1 iteration per loop cycle
                             condition["Iterations"] = 1
                             condition["CompletedIterations"] = 0
+                    
+                    # Check if we already have an end time condition in SmartExposure
+                    has_end_time_condition = any(
+                        condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer" 
+                        and condition.get("Hours") == end_hours 
+                        and condition.get("Minutes") == end_minutes
+                        for condition in values
+                    )
+                    
+                    if not has_end_time_condition:
+                        # Create a new TimeCondition for the end time IN SMARTEXPOSURE CONDITIONS ONLY
+                        end_time_condition = {
+                            "$id": str(len(values) + 1000),  # Unique ID
+                            "$type": "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer",
+                            "Hours": end_hours,
+                            "Minutes": end_minutes,
+                            "Seconds": 0,
+                            "DateTime": None,
+                            "Parent": None,
+                            "IsEnabled": True
+                        }
+                        values.append(end_time_condition)
+                        logger.debug(f"Added end time condition to SmartExposure: {end_hours:02d}:{end_minutes:02d}")
                 else:
+                    # Continue searching but don't modify any existing TimeConditions
                     for value in obj.values():
                         update_loop_until_time(value, end_hours, end_minutes)
             elif isinstance(obj, list):
@@ -1533,10 +1763,10 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         # Update all coordinates in the template
         update_coordinates(nina_json, ra_hours, ra_minutes, ra_seconds, dec_negative, dec_degrees, dec_minutes, dec_seconds)
         
-        # Update time condition (observation start time)
-        update_time_condition(nina_json, start_hours, start_minutes)
+        # Update START time condition (observation start time) in Target Imaging Instructions container
+        update_start_time_condition(nina_json, start_hours, start_minutes)
         
-        # Update loop condition with high iteration count (will loop until manually stopped or other conditions met)
+        # Update loop condition and END time (will loop until manually stopped or other conditions met)
         if minima_datetime:
             update_loop_until_time(nina_json, end_hours, end_minutes)
         
