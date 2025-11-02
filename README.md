@@ -104,3 +104,30 @@ portainer-ce   portainer/portainer-ce   "/portainer"             portainer-ce   
 |obsybox/opir_sensor|Arduino MKR 1010 Wifi|{"lux":143.56,"sky":11.81,"ambient":17.13,"ir":726,"full":2078,"aht_temp":16.20,"aht_hum":43.27}|
 |obsybox/power_usage| Tapo P110 plug from 192.168.1.49 once a minute; on rpis50| ip, power, timestamp|
 
+## Windows deployment (quick)
+
+We include helper files to deploy `get_system_stats.py` on Windows using Task Scheduler.
+
+- Wrapper (created in repo): `run_get_system_stats.cmd` — runs the Python script and appends stdout/stderr to `C:\Logs\obsybox\get_system_stats.log`.
+- Deploy helper: `deploy_task.ps1` — writes/updates the wrapper and registers a scheduled task that runs every minute.
+
+Quick steps (run PowerShell as Administrator):
+
+1. Generate the wrapper and register the task (uses Python on PATH unless you provide -PythonPath):
+
+    .\deploy_task.ps1 -PythonPath 'C:\Path\To\python.exe'
+
+2. Start the task now (optional):
+
+    schtasks /Run /TN "Obsybox_GetSystemStats"
+
+3. Tail the log:
+
+    Get-Content C:\Logs\obsybox\get_system_stats.log -Tail 200 -Wait
+
+If you prefer the raw `schtasks` command, example (PowerShell quoting):
+
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd' /RL HIGHEST /F /RU "SYSTEM"
+
+See `readme_windows_deploy` in the repo for a full explanation, troubleshooting tips and alternatives (Register-ScheduledTask, non-minute sampling, service options).
+

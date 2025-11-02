@@ -164,7 +164,6 @@ def try_upload_sequence_file(file_path):
     Some NINA versions expect a file upload (the UI uses a file import), so try
     posting the JSON file as form-data to common import endpoints.
     """
-    # The NINA docs indicate POST /sequence/load expects raw JSON in the request body.
     endpoints_to_try = [
         "/v2/api/sequence/load",
         "/v2/api/sequence/import",
@@ -172,19 +171,13 @@ def try_upload_sequence_file(file_path):
         "/v2/api/sequence",
     ]
 
-    try:
-        with open(file_path, "r", encoding="utf-8") as fh:
-            raw = fh.read()
-    except FileNotFoundError:
-        print(f"[!] Sequence file not found: {file_path}")
-        return None
-
-    headers = {"Content-Type": "application/json"}
     for ep in endpoints_to_try:
         url = f"{NINA_API_URL}{ep}"
         try:
-            print(f"Attempting raw JSON POST to {url} ...")
-            r = requests.post(url, data=raw.encode('utf-8'), headers=headers, timeout=20)
+            print(f"Attempting file POST {url} ...")
+            with open(file_path, "rb") as fh:
+                files = {"file": (os.path.basename(file_path), fh, "application/json")}
+                r = requests.post(url, files=files, timeout=20)
             print(f"  -> {ep} returned status {r.status_code}")
             try:
                 jr = r.json()
@@ -192,7 +185,7 @@ def try_upload_sequence_file(file_path):
             except Exception:
                 jr = None
             if r.status_code in (200, 201):
-                print(f"  -> Uploaded raw JSON to {ep} (status {r.status_code})")
+                print(f"  -> Uploaded file to {ep} (status {r.status_code})")
                 return jr or {"status_code": r.status_code, "text": r.text}
             else:
                 if jr and isinstance(jr, dict):
@@ -201,6 +194,9 @@ def try_upload_sequence_file(file_path):
                     print(f"     Body preview: {r.text[:400]!r}")
         except requests.RequestException as e:
             print(f"  -> POST to {ep} failed: {e}")
+        except FileNotFoundError:
+            print(f"[!] Sequence file not found: {file_path}")
+            return None
 
     return None
 
