@@ -39,6 +39,9 @@ DEFAULT_CONFIG = {
     },
     "azimuth_preferences": {
         "allowed_azimuths": ["N", "NE", "NW", "E", "W"]
+    },
+    "export_settings": {
+        "nina_export_base_dir": r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
     }
 }
 
@@ -100,7 +103,8 @@ def get_flat_config():
         'TARGET_SPACING': config['timing_parameters']['target_spacing'],
         'MAX_TARGETS_PER_NIGHT': config['timing_parameters']['max_targets_per_night'],
         'CENTER_AFTER_DRIFT_ARCMIN': config['tracking_parameters']['center_after_drift_arcmin'],
-        'ALLOWED_AZIMUTHS': config['azimuth_preferences']['allowed_azimuths']
+        'ALLOWED_AZIMUTHS': config['azimuth_preferences']['allowed_azimuths'],
+        'NINA_EXPORT_BASE_DIR': config['export_settings']['nina_export_base_dir']
     }
 
 def update_config_from_gui_values(gui_values):

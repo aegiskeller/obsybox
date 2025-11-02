@@ -62,6 +62,7 @@ try:
     MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
     TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
     ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+    NINA_EXPORT_BASE_DIR = config['NINA_EXPORT_BASE_DIR']
 except ImportError:
     logger.warning("Config module not found, using hardcoded defaults")
     # Fallback to hardcoded values
@@ -79,6 +80,7 @@ except ImportError:
     MAX_TARGETS_PER_NIGHT = 2
     TIMEZONE_OFFSET = 10
     ALLOWED_AZIMUTHS = ['N', 'NE', 'NW', 'E', 'W']
+    NINA_EXPORT_BASE_DIR = r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
 
 # Web scraping configuration
 BASE_URL = "https://var.astro.cz/en/Stars/MinimaPredictions"
@@ -1477,11 +1479,18 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     
     Args:
         targets: List of target dictionaries
-        output_dir: Directory to save the JSON files (default: same as script)
+        output_dir: Directory to save the JSON files (default: NINA VarStars directory with date)
         template_file: Path to template JSON file (default: NINA_TEMPLATE_FILE config)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent
+        # Create date-based directory structure using configurable base path
+        today = date.today()
+        date_str = today.strftime('%Y%m%d')  # Format: 20251102
+        output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+        
+        # Create the directory if it doesn't exist
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created output directory: {output_dir}")
     
     if template_file is None:
         template_file = NINA_TEMPLATE_FILE
@@ -1596,15 +1605,15 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 else 0
         dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 else 0.0
         
-        # Parse minima time to get observation start time (2 hours before minima)
+        # Parse minima time to get observation start and end times
         minima_datetime = target.get('minima_datetime_local')
         if minima_datetime:
             # Start 2 hours before minima
             start_time = minima_datetime - timedelta(hours=2)
             start_hours = start_time.hour
             start_minutes = start_time.minute
-            # End OBSERVATION_WINDOW hours after start
-            end_time = start_time + timedelta(hours=OBSERVATION_WINDOW)
+            # End 2 hours AFTER minima (not start + fixed window)
+            end_time = minima_datetime + timedelta(hours=2)
             end_hours = end_time.hour
             end_minutes = end_time.minute
         else:
@@ -1647,19 +1656,28 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_coordinates(item, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s)
         
-        # Helper function to update time condition
-        def update_time_condition(obj, hours, minutes):
-            """Recursively find and update TimeCondition in the JSON structure"""
+        # Helper function to update START time condition (in Target Imaging Instructions container)
+        def update_start_time_condition(obj, hours, minutes):
+            """Find and update TimeCondition in SequentialContainer for start time"""
             if isinstance(obj, dict):
-                if obj.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
-                    obj["Hours"] = hours
-                    obj["Minutes"] = minutes
+                # Look for SequentialContainer with name "Target Imaging Instructions"
+                if (obj.get("$type") == "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer" and 
+                    obj.get("Name") == "Target Imaging Instructions"):
+                    conditions = obj.get("Conditions", {})
+                    values = conditions.get("$values", [])
+                    
+                    # Update TimeCondition in this container
+                    for condition in values:
+                        if condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
+                            condition["Hours"] = hours
+                            condition["Minutes"] = minutes
+                            logger.debug(f"Set start time condition: {hours:02d}:{minutes:02d}")
                 else:
                     for value in obj.values():
-                        update_time_condition(value, hours, minutes)
+                        update_start_time_condition(value, hours, minutes)
             elif isinstance(obj, list):
                 for item in obj:
-                    update_time_condition(item, hours, minutes)
+                    update_start_time_condition(item, hours, minutes)
         
         # Helper function to update exposure time
         def update_exposure_time(obj, exp_time):
@@ -1677,11 +1695,11 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         # Helper function to update loop condition and add time-based end condition
         def update_loop_until_time(obj, end_hours, end_minutes):
             """
-            Update LoopCondition to 1 iteration and add TimeCondition to end observations
-            at the specified time.
+            Update LoopCondition to 1 iteration and add TimeCondition to SmartExposure 
+            conditions ONLY (not modifying existing TimeConditions elsewhere).
             """
             if isinstance(obj, dict):
-                # Look for LoopCondition within SmartExposure
+                # Look for SmartExposure specifically
                 if obj.get("$type") == "NINA.Sequencer.SequenceItem.Imaging.SmartExposure, NINA.Sequencer":
                     # Found SmartExposure, now look for its Conditions
                     conditions = obj.get("Conditions", {})
@@ -1694,7 +1712,7 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                             condition["Iterations"] = 1
                             condition["CompletedIterations"] = 0
                     
-                    # Add TimeCondition to stop at end time if not already present
+                    # Check if we already have an end time condition in SmartExposure
                     has_end_time_condition = any(
                         condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer" 
                         and condition.get("Hours") == end_hours 
@@ -1703,7 +1721,7 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                     )
                     
                     if not has_end_time_condition:
-                        # Create a new TimeCondition for the end time
+                        # Create a new TimeCondition for the end time IN SMARTEXPOSURE CONDITIONS ONLY
                         end_time_condition = {
                             "$id": str(len(values) + 1000),  # Unique ID
                             "$type": "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer",
@@ -1715,8 +1733,9 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                             "IsEnabled": True
                         }
                         values.append(end_time_condition)
-                        logger.debug(f"Added end time condition: {end_hours:02d}:{end_minutes:02d}")
+                        logger.debug(f"Added end time condition to SmartExposure: {end_hours:02d}:{end_minutes:02d}")
                 else:
+                    # Continue searching but don't modify any existing TimeConditions
                     for value in obj.values():
                         update_loop_until_time(value, end_hours, end_minutes)
             elif isinstance(obj, list):
@@ -1744,10 +1763,10 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         # Update all coordinates in the template
         update_coordinates(nina_json, ra_hours, ra_minutes, ra_seconds, dec_negative, dec_degrees, dec_minutes, dec_seconds)
         
-        # Update time condition (observation start time)
-        update_time_condition(nina_json, start_hours, start_minutes)
+        # Update START time condition (observation start time) in Target Imaging Instructions container
+        update_start_time_condition(nina_json, start_hours, start_minutes)
         
-        # Update loop condition with high iteration count (will loop until manually stopped or other conditions met)
+        # Update loop condition and END time (will loop until manually stopped or other conditions met)
         if minima_datetime:
             update_loop_until_time(nina_json, end_hours, end_minutes)
         

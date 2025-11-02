@@ -29,7 +29,8 @@ from findTargets import (
     export_to_nina_format,
     export_to_nina_json,
     record_scheduled_targets,
-    format_target_display_name
+    format_target_display_name,
+    NINA_EXPORT_BASE_DIR
 )
 
 # Import configuration management
@@ -94,7 +95,7 @@ class TargetSelectorGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("NINA Variable Star Target Selector")
-        self.root.geometry("900x700")
+        self.root.geometry("900x910")  # Increased height by 30% (700 → 910)
         self.root.configure(bg=COLORS['bg_dark'])
         
         # Initialize variables early (before creating UI components that reference them)
@@ -540,6 +541,22 @@ class TargetSelectorGUI:
         )
         self.targets_text.pack(fill='both', expand=True, padx=20, pady=(0, 20))
         
+        # Export path info frame
+        export_info_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        export_info_frame.pack(fill='x', padx=20, pady=(0, 10))
+        
+        # Export path label
+        export_path_text = self.get_export_path_display()
+        self.export_path_label = tk.Label(
+            export_info_frame,
+            text=f"📁 Export Path: {export_path_text}",
+            bg=COLORS['bg_dark'],
+            fg=COLORS['text_dim'],
+            font=('Helvetica', 9),
+            anchor='w'
+        )
+        self.export_path_label.pack(fill='x')
+
         # Buttons frame
         buttons_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
         buttons_frame.pack(fill='x', padx=20, pady=(0, 20))
@@ -695,6 +712,8 @@ class TargetSelectorGUI:
         # Update both date labels
         self.date_label.config(text=f"Target Date: {self.observation_date.strftime('%Y-%m-%d')}")
         self.main_date_label.config(text=f"Obs Night: {self.observation_date.strftime('%Y-%m-%d')}")
+        # Update export path display
+        self.update_export_path_display()
         self.log_message(f"Date refreshed to {self.observation_date.strftime('%Y-%m-%d')}", 'info')
     
     def reset_to_defaults(self):
@@ -794,6 +813,8 @@ class TargetSelectorGUI:
         # Update both date labels
         self.date_label.config(text=f"Target Date: {self.observation_date.strftime('%Y-%m-%d')}")
         self.main_date_label.config(text=f"Obs Night: {self.observation_date.strftime('%Y-%m-%d')}")
+        # Update export path display
+        self.update_export_path_display()
         
         # Disable button during generation
         self.generate_button.config(state='disabled', text="Generating...")
@@ -1202,6 +1223,20 @@ class TargetSelectorGUI:
         
         fig.canvas.mpl_connect("motion_notify_event", hover)
     
+    def get_export_path_display(self):
+        """Get the current export path for display in the GUI"""
+        from datetime import date
+        today = date.today()
+        date_str = today.strftime('%Y%m%d')
+        full_path = Path(NINA_EXPORT_BASE_DIR) / date_str
+        return str(full_path)
+    
+    def update_export_path_display(self):
+        """Update the export path label with current date"""
+        if hasattr(self, 'export_path_label'):
+            export_path_text = self.get_export_path_display()
+            self.export_path_label.config(text=f"📁 Export Path: {export_path_text}")
+    
     def export_nina_json(self):
         """Export selected targets as NINA JSON files"""
         if not self.selected_targets:
@@ -1221,11 +1256,17 @@ class TargetSelectorGUI:
             
             # Export NINA JSON files
             export_to_nina_json(self.selected_targets)
-            self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files", 'success')
+            
+            # Get the output directory for the success message
+            today = date.today()
+            date_str = today.strftime('%Y%m%d')
+            output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+            
+            self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
             messagebox.showinfo(
                 "Export Successful",
                 f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
-                f"{Path.cwd()}\n\n"
+                f"{output_dir}\n\n"
                 f"Targets have been recorded in the database."
             )
         except Exception as e:
