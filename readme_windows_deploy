@@ -116,7 +116,45 @@ Run PowerShell as Administrator and paste:
     Set-Content -Path $wrapper -Value $content -Encoding ASCII
 
 10) Want me to add these helper files to the repo?
-------------------------------------------------
 I can create `run_get_system_stats.cmd` in the repo and a PowerShell script `deploy_task.ps1` that creates/registers the scheduled task (you'll still need to run it as Administrator and update the Python path). Tell me if you want that and which user account the task should run under (SYSTEM or a specific user). 
 
 End
+
+11) Unregister / stop / check task results
+-----------------------------------------
+If you need to stop the scheduled job, remove it, or inspect why it failed, use the commands below.
+
+- Stop a currently running scheduled task immediately:
+
+    schtasks /End /TN "Obsybox_GetSystemStats"
+
+- Delete the scheduled task (remove from Task Scheduler):
+
+    schtasks /Delete /TN "Obsybox_GetSystemStats" /F
+
+  Or in PowerShell (unregister):
+
+    Unregister-ScheduledTask -TaskName "Obsybox_GetSystemStats" -Confirm:$false
+
+- Check task registration, Last Run Time and Last Run Result (human readable):
+
+    schtasks /Query /TN "Obsybox_GetSystemStats" /V /FO LIST
+
+  Or with PowerShell objects:
+
+    Get-ScheduledTask -TaskName "Obsybox_GetSystemStats" | Get-ScheduledTaskInfo
+
+- Inspect Task Scheduler operational log for errors (Event Viewer):
+
+    # Show recent Task Scheduler events for the task
+    Get-WinEvent -LogName 'Microsoft-Windows-TaskScheduler/Operational' | Where-Object { $_.Message -like '*Obsybox_GetSystemStats*' } | Select-Object TimeCreated, Id, LevelDisplayName, Message -Last 50
+
+- Check the wrapper log produced by `run_get_system_stats.cmd`:
+
+    Get-Content C:\Logs\obsybox\get_system_stats.log -Tail 200
+
+Notes:
+- "Last Run Result" is an exit code returned by the task process; 0 usually means success. If you see non-zero codes, check the wrapper log to see Python exceptions or stderr output.
+- If you created the task under a specific user, you may need to run the unregister command as that user or as an Administrator.
+- If you see permission denied or network access errors, consider running the task under an account with the required privileges instead of SYSTEM.
+
