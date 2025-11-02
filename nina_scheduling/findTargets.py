@@ -1488,9 +1488,9 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         date_str = today.strftime('%Y%m%d')  # Format: 20251102
         output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
         
-        # Create the directory if it doesn't exist
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created output directory: {output_dir}")
+    # Always ensure the output directory exists (whether default or custom)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Created output directory: {output_dir}")
     
     if template_file is None:
         template_file = NINA_TEMPLATE_FILE
