@@ -1,0 +1,122 @@
+Windows deployment notes — Obsybox get_system_stats
+===============================================
+
+Purpose
+-------
+This document shows how to deploy `get_system_stats.py` on Windows using Task Scheduler. It includes a small wrapper, `schtasks` (cmd) examples and PowerShell `Register-ScheduledTask` examples, logging tips, and troubleshooting notes.
+
+Prerequisites
+-------------
+- Python installed (preferably the same interpreter you use interactively). If you use a virtualenv, use the venv's `python.exe` path.
+- (Optional) `psutil`, `paho-mqtt`, `requests` if you want richer telemetry and direct MQTT publishing from Python.
+- If you want CLI MQTT publishing fallbacks: `mosquitto_pub` installed and on PATH.
+- Administrator privileges to create tasks for the SYSTEM account (or a specific user account with appropriate privileges).
+
+Paths used in examples
+----------------------
+- Repo script: C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\get_system_stats.py
+- Example wrapper (we'll create): C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd
+- Log folder: C:\Logs\obsybox
+
+1) Create a logs directory (optional but recommended)
+--------------------------------------------------
+Open PowerShell as Administrator and run:
+
+    New-Item -ItemType Directory -Path C:\Logs\obsybox -Force
+
+Ensure the account that will run the task can write to that folder.
+
+2) Create the wrapper command file (recommended)
+-----------------------------------------------
+Create `run_get_system_stats.cmd` with the following content (edit python path if you use a venv):
+
+    @echo off
+    "C:\Path\To\python.exe" "C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\get_system_stats.py" D: >> "C:\Logs\obsybox\get_system_stats.log" 2>&1
+
+Notes:
+- Using a wrapper simplifies quoting and lets you redirect stdout/stderr to a log file for debugging.
+- Replace `C:\Path\To\python.exe` with the actual Python executable you want Task Scheduler to run (do not rely on PATH).
+
+3) Create a scheduled task that repeats every minute (recommended approach)
+---------------------------------------------------------------------
+PowerShell-friendly `schtasks` command (use single quotes in PS to avoid escaping):
+
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd' /ST 00:00 /DU 24:00 /F /RL HIGHEST /RU "SYSTEM"
+
+If you run the above in cmd.exe instead of PowerShell, use double quotes for /TR:
+
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR "C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd" /ST 00:00 /DU 24:00 /F /RL HIGHEST /RU "SYSTEM"
+
+Explanation of important flags:
+- /SC MINUTE /MO 1 — schedule repeats every 1 minute.
+- /ST 00:00 /DU 24:00 — start at midnight and repeat for 24 hours (makes the ONCE workaround unnecessary).
+- /RU "SYSTEM" — run as the LocalSystem account (no password). If you need network access or user-scoped resources, use a domain/local user and provide credentials (/RU user /RP password).
+- /RL HIGHEST — run elevated.
+
+4) Create the scheduled task via PowerShell cmdlets (alternative)
+----------------------------------------------------------------
+This is more flexible and scriptable from PowerShell (run as Administrator):
+
+    $action = New-ScheduledTaskAction -Execute "C:\Path\To\python.exe" -Argument "`"C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\get_system_stats.py`" D:"
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date)
+    $trigger.RepetitionInterval = (New-TimeSpan -Minutes 1)
+    $trigger.RepetitionDuration = (New-TimeSpan -Days 365)
+    Register-ScheduledTask -TaskName "Obsybox_GetSystemStats" -Action $action -Trigger $trigger -RunLevel Highest -User "SYSTEM"
+
+Notes:
+- You may need to run PowerShell as Administrator to register a SYSTEM task.
+- Change -User to a specific user if SYSTEM does not suit your needs.
+
+5) Run the task immediately and inspect logs
+------------------------------------------
+Start the task now:
+
+    schtasks /Run /TN "Obsybox_GetSystemStats"
+
+Check task status and last run info:
+
+    schtasks /Query /TN "Obsybox_GetSystemStats" /V /FO LIST
+
+Or with PowerShell:
+
+    Get-ScheduledTask -TaskName "Obsybox_GetSystemStats" | Get-ScheduledTaskInfo
+
+View the log file tail:
+
+    Get-Content C:\Logs\obsybox\get_system_stats.log -Tail 200
+
+6) Common errors & troubleshooting
+----------------------------------
+- ERROR: Invalid argument/option - 'C:\path\to\file\' : This usually means your quoting is incorrect. In PowerShell use single quotes around the /TR argument to avoid escaping, or run the command in cmd.exe and use double quotes.
+- Task seems not to run: check the "Last Run Result" (schtasks /Query ...). Use the log file to see Python exceptions.
+- MQTT publish failures: ensure broker 192.168.1.49 is reachable from the host and does not require auth/TLS (scripts currently assume no auth). Use mosquitto_sub on another machine to monitor the topic.
+- PATH differences: Scheduled tasks run with a limited environment. Always use full paths to executables and files.
+- Permissions: if the script needs to access network resources requiring user credentials, do not use SYSTEM; create the task under an account with the proper rights.
+
+7) If you need sub-minute frequency
+----------------------------------
+Task Scheduler cannot reliably run more frequently than once per minute. For sub-minute sampling (e.g., every 5 seconds) consider:
+- Running Python as a background service (use NSSM to wrap the script) or
+- Create a Windows service (e.g., with `pywin32` or `winsvc`) that runs continuously and sleeps between samples.
+
+8) Security
+-----------
+- Avoid embedding plain text passwords in scripts. If you must use a user account, use a secure mechanism (Group Managed Service Accounts, or store credentials securely).
+- If your MQTT broker uses credentials or TLS, update `get_system_stats.py` to pass the username/password or certificate options to paho.mqtt.
+
+9) Example: create wrapper file automatically (PowerShell)
+--------------------------------------------------------
+Run PowerShell as Administrator and paste:
+
+    $wrapper = 'C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd'
+    $python = 'C:\Path\To\python.exe' # update this path
+    $script = 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\get_system_stats.py'
+    $log = 'C:\Logs\obsybox\get_system_stats.log'
+    $content = "@echo off`n`"$python`" `"$script`" D: >> `"$log`" 2>&1"
+    Set-Content -Path $wrapper -Value $content -Encoding ASCII
+
+10) Want me to add these helper files to the repo?
+------------------------------------------------
+I can create `run_get_system_stats.cmd` in the repo and a PowerShell script `deploy_task.ps1` that creates/registers the scheduled task (you'll still need to run it as Administrator and update the Python path). Tell me if you want that and which user account the task should run under (SYSTEM or a specific user). 
+
+End
