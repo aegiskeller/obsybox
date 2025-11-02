@@ -108,14 +108,14 @@ portainer-ce   portainer/portainer-ce   "/portainer"             portainer-ce   
 
 We include helper files to deploy `get_system_stats.py` on Windows using Task Scheduler.
 
-- Wrapper (created in repo): `run_get_system_stats.cmd` — runs the Python script and appends stdout/stderr to `C:\Logs\obsybox\get_system_stats.log`.
-- Deploy helper: `deploy_task.ps1` — writes/updates the wrapper and registers a scheduled task that runs every minute.
+-- Wrapper (created in repo): `systemMonitoring/ComputeMonitoring/run_get_system_stats.cmd` — runs the Python script and appends stdout/stderr to `C:\Logs\obsybox\get_system_stats.log`.
+-- Deploy helper: `systemMonitoring/ComputeMonitoring/deploy_task.ps1` — writes/updates the wrapper and registers a scheduled task that runs every minute.
 
 Quick steps (run PowerShell as Administrator):
 
 1. Generate the wrapper and register the task (uses Python on PATH unless you provide -PythonPath):
 
-    .\deploy_task.ps1 -PythonPath 'C:\Path\To\python.exe'
+    .\systemMonitoring\ComputeMonitoring\deploy_task.ps1 -PythonPath 'C:\Path\To\python.exe'
 
 2. Start the task now (optional):
 
@@ -127,7 +127,22 @@ Quick steps (run PowerShell as Administrator):
 
 If you prefer the raw `schtasks` command, example (PowerShell quoting):
 
-    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd' /RL HIGHEST /F /RU "SYSTEM"
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd' /RL HIGHEST /F /RU "SYSTEM"
 
 See `readme_windows_deploy` in the repo for a full explanation, troubleshooting tips and alternatives (Register-ScheduledTask, non-minute sampling, service options).
+
+Undeploy example
+-----------------
+To remove the task and wrapper, run the undeploy helper from the repo root as Administrator:
+
+    .\systemMonitoring\ComputeMonitoring\undeploy_task.ps1
+
+To also remove the log file:
+
+    .\systemMonitoring\ComputeMonitoring\undeploy_task.ps1 -RemoveLog
+
+You can also remove the task directly with schtasks if you prefer:
+
+    schtasks /Delete /TN "Obsybox_GetSystemStats" /F
+
 

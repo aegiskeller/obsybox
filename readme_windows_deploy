@@ -15,7 +15,7 @@ Prerequisites
 Paths used in examples
 ----------------------
 - Repo script: C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\get_system_stats.py
-- Example wrapper (we'll create): C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd
+-- Example wrapper (we'll create): C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd
 - Log folder: C:\Logs\obsybox
 
 1) Create a logs directory (optional but recommended)
@@ -41,11 +41,11 @@ Notes:
 ---------------------------------------------------------------------
 PowerShell-friendly `schtasks` command (use single quotes in PS to avoid escaping):
 
-    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd' /ST 00:00 /DU 24:00 /F /RL HIGHEST /RU "SYSTEM"
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd' /ST 00:00 /DU 24:00 /F /RL HIGHEST /RU "SYSTEM"
 
 If you run the above in cmd.exe instead of PowerShell, use double quotes for /TR:
 
-    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR "C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd" /ST 00:00 /DU 24:00 /F /RL HIGHEST /RU "SYSTEM"
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR "C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd" /ST 00:00 /DU 24:00 /F /RL HIGHEST /RU "SYSTEM"
 
 Explanation of important flags:
 - /SC MINUTE /MO 1 — schedule repeats every 1 minute.
@@ -108,7 +108,7 @@ Task Scheduler cannot reliably run more frequently than once per minute. For sub
 --------------------------------------------------------
 Run PowerShell as Administrator and paste:
 
-    $wrapper = 'C:\Users\Admin\Documents\Arduino\obsybox\run_get_system_stats.cmd'
+    $wrapper = 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd'
     $python = 'C:\Path\To\python.exe' # update this path
     $script = 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\get_system_stats.py'
     $log = 'C:\Logs\obsybox\get_system_stats.log'
@@ -157,4 +157,28 @@ Notes:
 - "Last Run Result" is an exit code returned by the task process; 0 usually means success. If you see non-zero codes, check the wrapper log to see Python exceptions or stderr output.
 - If you created the task under a specific user, you may need to run the unregister command as that user or as an Administrator.
 - If you see permission denied or network access errors, consider running the task under an account with the required privileges instead of SYSTEM.
+
+12) Undeploy helper (local)
+---------------------------
+We added an undeploy helper script that stops and removes the scheduled task, removes the wrapper, and (optionally) deletes the log file.
+
+Run as Administrator from the repo root (example):
+
+    .\systemMonitoring\ComputeMonitoring\undeploy_task.ps1
+
+To also delete the log file:
+
+    .\systemMonitoring\ComputeMonitoring\undeploy_task.ps1 -RemoveLog
+
+Equivalent raw commands (if you prefer):
+
+    schtasks /End /TN "Obsybox_GetSystemStats"
+    schtasks /Delete /TN "Obsybox_GetSystemStats" /F
+
+And remove wrapper/log files manually, if needed:
+
+    del "C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd"
+    del "C:\Logs\obsybox\get_system_stats.log"
+
+Notes: the helper is idempotent and safe to run multiple times; if the Task Scheduler UI still lists the task after running the helper, delete it in the Task Scheduler GUI.
 
