@@ -53,6 +53,44 @@ Explanation of important flags:
 - /RU "SYSTEM" — run as the LocalSystem account (no password). If you need network access or user-scoped resources, use a domain/local user and provide credentials (/RU user /RP password).
 - /RL HIGHEST — run elevated.
 
+Exact command (no stop time)
+----------------------------
+If you want the scheduled task to repeat every minute with no defined stop (/DU) so it runs until removed, use one of the exact commands below (run as Administrator).
+
+1) schtasks (single-line, PowerShell or cmd)
+
+PowerShell (single-quoted /TR to avoid escaping):
+
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd' /F /RL HIGHEST /RU "SYSTEM"
+
+cmd.exe form (double-quoted /TR):
+
+    schtasks /Create /SC MINUTE /MO 1 /TN "Obsybox_GetSystemStats" /TR "C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd" /F /RL HIGHEST /RU "SYSTEM"
+
+Notes:
+- Omitting `/DU` means the schedule keeps repeating indefinitely until you delete the task.
+- /F forces overwrite if the task already exists.
+
+2) PowerShell ScheduledTask (exact snippet, prevents overlap)
+
+This registers a repeating trigger that effectively never ends (large RepetitionDuration). It also prevents overlapping runs and limits execution time per invocation.
+
+Run as Administrator and paste the following exactly (adjust ExecutionTimeLimit and paths as needed):
+
+    $wrapper = 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats.cmd'
+    $action = New-ScheduledTaskAction -Execute $wrapper
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date)
+    $trigger.RepetitionInterval = (New-TimeSpan -Minutes 1)
+    $trigger.RepetitionDuration = (New-TimeSpan -Days 36500)
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -StartWhenAvailable
+    Register-ScheduledTask -TaskName "Obsybox_GetSystemStats" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -User "SYSTEM"
+
+Explanation of the settings above:
+- `IgnoreNew` prevents a new run from starting if the previous invocation is still running.
+- `ExecutionTimeLimit` defines how long a single run may execute before the scheduler considers it timed out.
+- `RepetitionDuration` is set to 100 years (effectively indefinite for our purposes).
+
+
 4) Create the scheduled task via PowerShell cmdlets (alternative)
 ----------------------------------------------------------------
 This is more flexible and scriptable from PowerShell (run as Administrator):
