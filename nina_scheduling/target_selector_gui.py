@@ -51,6 +51,7 @@ try:
     MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
     TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
     ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+    ALLOW_G_TARGETS = config['ALLOW_G_TARGETS']
 except ImportError:
     # Fallback to importing from findTargets if config module not available
     from findTargets import (
@@ -59,6 +60,7 @@ except ImportError:
         OBSERVATION_WINDOW, MIN_ALTITUDE_DURING_OBS, TARGET_SPACING,
         CENTER_AFTER_DRIFT_ARCMIN, MAX_TARGETS_PER_NIGHT, TIMEZONE_OFFSET
     )
+    ALLOW_G_TARGETS = True  # Default fallback value
 
 # Midnight color scheme
 COLORS = {
@@ -288,6 +290,9 @@ class TargetSelectorGUI:
         # Azimuth settings card (checkboxes)
         self.create_azimuth_card(scrollable_frame)
         
+        # Target constraints card (checkboxes)
+        self.create_target_constraints_card(scrollable_frame)
+        
         # Date display and Generate button
         button_frame = tk.Frame(scrollable_frame, bg=COLORS['bg_dark'])
         button_frame.pack(fill='x', padx=20, pady=20)
@@ -480,6 +485,49 @@ class TargetSelectorGUI:
                 font=('Helvetica', 10)
             )
             cb.pack(side='left', padx=10, pady=5)
+        
+        # Bottom padding
+        tk.Frame(card, bg=COLORS['bg_light'], height=10).pack()
+    
+    def create_target_constraints_card(self, parent):
+        """Create target constraints card with checkboxes"""
+        card = tk.Frame(parent, bg=COLORS['bg_light'], relief='flat')
+        card.pack(fill='x', padx=20, pady=10)
+        
+        # Title
+        title_label = tk.Label(
+            card,
+            text="🎯 Target Constraints",
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            font=('Helvetica', 12, 'bold')
+        )
+        title_label.pack(anchor='w', padx=15, pady=(15, 10))
+        
+        # Checkbox frame
+        checkbox_frame = tk.Frame(card, bg=COLORS['bg_light'])
+        checkbox_frame.pack(fill='x', padx=15, pady=5)
+        
+        # G-targets checkbox
+        self.allow_g_targets_var = tk.BooleanVar(value=ALLOW_G_TARGETS)
+        
+        g_targets_cb = tk.Checkbutton(
+            checkbox_frame,
+            text="Allow Gxxxx.yyyyy targets",
+            variable=self.allow_g_targets_var,
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            selectcolor=COLORS['bg_medium'],
+            activebackground=COLORS['bg_light'],
+            activeforeground=COLORS['text'],
+            font=('Helvetica', 10)
+        )
+        g_targets_cb.pack(side='left', padx=10, pady=5)
+        
+        # Add tooltip for explanation
+        self.create_tooltip(g_targets_cb, 
+            "When unchecked, excludes catalog targets of the form 'G1234.56789' "
+            "from target selection. These are typically WDS double star catalog entries.")
         
         # Bottom padding
         tk.Frame(card, bg=COLORS['bg_light'], height=10).pack()
@@ -771,6 +819,9 @@ class TargetSelectorGUI:
             for az, var in self.azimuth_vars.items():
                 var.set(az in default_azimuths)
             
+            # Reset target constraints checkboxes
+            self.allow_g_targets_var.set(DEFAULT_CONFIG['target_constraints']['allow_g_targets'])
+            
             self.log_message("All parameters reset to defaults", 'info')
             
         except ImportError:
@@ -844,7 +895,8 @@ class TargetSelectorGUI:
                 'observation_window': float(self.entries['obs_window'].get()),
                 'target_spacing': float(self.entries['target_spacing'].get()),
                 'max_targets_per_night': int(self.entries['max_targets'].get()),
-                'allowed_azimuths': [az for az, var in self.azimuth_vars.items() if var.get()]
+                'allowed_azimuths': [az for az, var in self.azimuth_vars.items() if var.get()],
+                'allow_g_targets': self.allow_g_targets_var.get()
             }
             
             # Save configuration to persistent storage
@@ -873,6 +925,7 @@ class TargetSelectorGUI:
             findTargets.MAX_TARGETS_PER_NIGHT = gui_values['max_targets_per_night']
             findTargets.TIMEZONE_OFFSET = int(self.entries['timezone'].get())
             findTargets.ALLOWED_AZIMUTHS = gui_values['allowed_azimuths']
+            findTargets.ALLOW_G_TARGETS = gui_values['allow_g_targets']
             
             self.log_message(f"Configuration: Lat={findTargets.LATITUDE}, Lon={findTargets.LONGITUDE}", 'info')
             

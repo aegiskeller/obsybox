@@ -40,6 +40,9 @@ DEFAULT_CONFIG = {
     "azimuth_preferences": {
         "allowed_azimuths": ["N", "NE", "NW", "E", "W"]
     },
+    "target_constraints": {
+        "allow_g_targets": True
+    },
     "export_settings": {
         "nina_export_base_dir": r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
     }
@@ -104,6 +107,7 @@ def get_flat_config():
         'MAX_TARGETS_PER_NIGHT': config['timing_parameters']['max_targets_per_night'],
         'CENTER_AFTER_DRIFT_ARCMIN': config['tracking_parameters']['center_after_drift_arcmin'],
         'ALLOWED_AZIMUTHS': config['azimuth_preferences']['allowed_azimuths'],
+        'ALLOW_G_TARGETS': config['target_constraints']['allow_g_targets'],
         'NINA_EXPORT_BASE_DIR': config['export_settings']['nina_export_base_dir']
     }
 
@@ -135,5 +139,9 @@ def update_config_from_gui_values(gui_values):
     # Update azimuth preferences
     if 'allowed_azimuths' in gui_values:
         config['azimuth_preferences']['allowed_azimuths'] = gui_values['allowed_azimuths']
+    
+    # Update target constraints
+    if 'allow_g_targets' in gui_values:
+        config['target_constraints']['allow_g_targets'] = gui_values['allow_g_targets']
     
     return save_config(config)

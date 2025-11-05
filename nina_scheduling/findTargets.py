@@ -62,6 +62,7 @@ try:
     MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
     TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
     ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+    ALLOW_G_TARGETS = config['ALLOW_G_TARGETS']
     NINA_EXPORT_BASE_DIR = config['NINA_EXPORT_BASE_DIR']
 except ImportError:
     logger.warning("Config module not found, using hardcoded defaults")
@@ -80,6 +81,7 @@ except ImportError:
     MAX_TARGETS_PER_NIGHT = 2
     TIMEZONE_OFFSET = 10
     ALLOWED_AZIMUTHS = ['N', 'NE', 'NW', 'E', 'W']
+    ALLOW_G_TARGETS = True
     NINA_EXPORT_BASE_DIR = r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
 
 # Web scraping configuration
@@ -535,11 +537,23 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
         'altitude_filtered': 0,
         'azimuth_filtered': 0,
         'declination_filtered': 0,
+        'g_targets_filtered': 0,
         'passed': 0
     }
     
     for target in targets:
         passed = True
+        
+        # Filter by G-targets if not allowed
+        if not ALLOW_G_TARGETS:
+            target_name = target.get('name', '')
+            if target_name.startswith('G') and '.' in target_name:
+                # Check if it matches the pattern Gnnnn.nnnnn (G followed by digits, dot, digits)
+                import re
+                if re.match(r'^G\d+\.\d+', target_name):
+                    stats['g_targets_filtered'] += 1
+                    passed = False
+                    continue
         
         # Filter by magnitude
         try:
@@ -590,7 +604,8 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
     logger.info(f"Filter stats: {stats['passed']} passed, "
                 f"{stats['magnitude_filtered']} filtered by magnitude, "
                 f"{stats['altitude_filtered']} filtered by altitude, "
-                f"{stats['azimuth_filtered']} filtered by azimuth")
+                f"{stats['azimuth_filtered']} filtered by azimuth, "
+                f"{stats['g_targets_filtered']} G-targets filtered")
     
     return filtered
 
