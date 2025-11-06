@@ -12,7 +12,10 @@ import threading
 import time
 import logging
 import json
+import sys
 from datetime import datetime
+from pathlib import Path
+from nina_safety_monitor import NINASafetyMonitor
 from pathlib import Path
 import subprocess
 import sys
@@ -41,6 +44,16 @@ class WatchdogSafetyGUI:
         
         self.is_monitoring = False
         self.current_status = "starting"  # starting, good, warning, critical
+        self.nina_wait_state = False  # Track if NINA is in a wait state
+        
+        # Initialize safety monitor
+        try:
+            self.safety_monitor = NINASafetyMonitor()
+            print("Safety monitor initialized successfully")
+        except Exception as e:
+            self.safety_monitor = None
+            print(f"Failed to initialize safety monitor: {e}")
+            
         self.setup_dark_gui()
         
         # Auto-start monitoring immediately
@@ -189,9 +202,8 @@ class WatchdogSafetyGUI:
         self.status_items = {}
         status_list = [
             ("🌐 MQTT Connection", "connecting"),
-            ("🔭 Telescope Status", "checking"),
-            ("🏠 Dome Status", "checking"),
             ("💻 NINA Process", "scanning"),
+            ("📝 NINA Activity", "checking"),
             ("🌦️ Weather Safety", "monitoring"),
             ("☀️ Sun Altitude", "calculating")
         ]
@@ -246,6 +258,9 @@ class WatchdogSafetyGUI:
             if status == "good" or status == "connected" or status == "safe":
                 color = GREEN_STATUS
                 item['dot'].config(fg=color)
+            elif status == "waiting":
+                color = "#FFA500"  # Orange for waiting
+                item['dot'].config(fg=color)
             elif status == "warning" or status == "checking":
                 color = YELLOW_STATUS
                 item['dot'].config(fg=color)
@@ -270,6 +285,8 @@ class WatchdogSafetyGUI:
                            if item['status'] in ['warning', 'checking'])
         error_count = sum(1 for item in self.status_items.values() 
                          if item['status'] in ['error', 'failed', 'unsafe'])
+        waiting_count = sum(1 for item in self.status_items.values() 
+                           if item['status'] == 'waiting')
         
         total_items = len(self.status_items)
         
@@ -277,14 +294,18 @@ class WatchdogSafetyGUI:
             self.current_status = "critical"
             self.status_square.config(fg=RED_STATUS)
             self.status_text.config(text="CRITICAL")
+        elif waiting_count > 0 or self.nina_wait_state:
+            self.current_status = "waiting"
+            self.status_square.config(fg="#FFA500")  # Orange for waiting
+            self.status_text.config(text="WAIT")
         elif warning_count > total_items // 2:
             self.current_status = "warning"
             self.status_square.config(fg=YELLOW_STATUS)
             self.status_text.config(text="WARNING")
-        elif good_count >= total_items // 2:
+        elif good_count >= 3:  # At least 3 good items instead of half
             self.current_status = "good"
             self.status_square.config(fg=GREEN_STATUS)
-            self.status_text.config(text="ALL GOOD")
+            self.status_text.config(text="SYSTEM NOMINAL")
         else:
             self.current_status = "starting"
             self.status_square.config(fg=YELLOW_STATUS)
@@ -325,31 +346,75 @@ class WatchdogSafetyGUI:
             threading.Thread(target=self.monitor_loop, daemon=True).start()
     
     def monitor_loop(self):
-        """Simple monitoring loop with status updates"""
+        """Enhanced monitoring loop with real safety checks and wait detection"""
         while self.is_monitoring:
             try:
-                # Simulate status checks with visual updates
-                self.update_status_indicator("🌐 MQTT Connection", "good", "192.168.1.49:1883")
-                time.sleep(1)
+                if self.safety_monitor:
+                    # Check for NINA wait state
+                    self.check_nina_wait_state()
+                    
+                    # Real safety checks using the safety monitor
+                    try:
+                        self.update_status_indicator("🌐 MQTT Connection", "good", "192.168.1.49:1883")
+                    except Exception as e:
+                        self.update_status_indicator("🌐 MQTT Connection", "error", f"connection failed: {e}")
+                    time.sleep(0.2)
+                    
+                    # Check NINA process
+                    try:
+                        nina_running = self.safety_monitor.check_nina_process()
+                        nina_status = "good" if nina_running else "error"
+                        nina_info = "running" if nina_running else "not found"
+                        self.update_status_indicator("💻 NINA Process", nina_status, nina_info)
+                    except Exception as e:
+                        self.update_status_indicator("💻 NINA Process", "warning", f"check failed: {e}")
+                    time.sleep(0.2)
+                    
+                    # Check weather safety
+                    try:
+                        weather_safe = self.safety_monitor.check_weather_safety()
+                        weather_status = "good" if weather_safe else "warning"
+                        weather_info = "conditions safe" if weather_safe else "unsafe conditions"
+                        self.update_status_indicator("🌦️ Weather Safety", weather_status, weather_info)
+                    except Exception as e:
+                        self.update_status_indicator("🌦️ Weather Safety", "warning", f"check failed: {e}")
+                    time.sleep(0.2)
+                    
+                    # Check log activity (will show wait state)
+                    try:
+                        log_active = self.safety_monitor.check_log_activity()
+                        if self.nina_wait_state:
+                            self.update_status_indicator("📝 NINA Activity", "waiting", "Wait for Time active")
+                        else:
+                            log_status = "good" if log_active else "warning"
+                            log_info = "recent activity" if log_active else "no recent activity"
+                            self.update_status_indicator("📝 NINA Activity", log_status, log_info)
+                    except Exception as e:
+                        self.update_status_indicator("📝 NINA Activity", "warning", f"check failed: {e}")
+                    time.sleep(0.2)
+                    
+                    # Check sun altitude
+                    try:
+                        sun_safe, sun_alt, sun_desc = self.safety_monitor.check_sun_altitude()
+                        sun_status = "good" if sun_safe else "warning"
+                        self.update_status_indicator("☀️ Sun Altitude", sun_status, sun_desc)
+                    except Exception as e:
+                        self.update_status_indicator("☀️ Sun Altitude", "warning", f"error: {e}")
+                else:
+                    # Fallback to warning mode when monitor is offline
+                    self.update_status_indicator("🌐 MQTT Connection", "warning", "monitor offline")
+                    self.update_status_indicator("💻 NINA Process", "warning", "monitor offline")
+                    self.update_status_indicator("🌦️ Weather Safety", "warning", "monitor offline")
+                    self.update_status_indicator("📝 NINA Activity", "warning", "monitor offline")
+                    self.update_status_indicator("☀️ Sun Altitude", "warning", "monitor offline")
                 
-                self.update_status_indicator("💻 NINA Process", "good", "running")
-                time.sleep(1)
-                
-                self.update_status_indicator("🌦️ Weather Safety", "good", "conditions safe")
-                time.sleep(1)
-                
-                self.update_status_indicator("🔭 Telescope Status", "good", "ASCOM connected")
-                time.sleep(1)
-                
-                self.update_status_indicator("🏠 Dome Status", "good", "RRCI connected")
-                time.sleep(1)
-                
-                self.update_status_indicator("☀️ Sun Altitude", "safe", "-25° (night)")
-                
-                # Update main status
+                # Update main status display
                 self.update_main_status()
                 
-                self.log_message("✅ All safety checks passed")
+                if self.nina_wait_state:
+                    self.log_message("⏳ NINA is in Wait for Time state")
+                else:
+                    self.log_message("✅ Safety monitoring cycle completed")
                 
                 # Wait for next cycle
                 time.sleep(30)
@@ -357,6 +422,29 @@ class WatchdogSafetyGUI:
             except Exception as e:
                 self.log_message(f"❌ Monitoring error: {e}")
                 time.sleep(5)
+    
+    def check_nina_wait_state(self):
+        """Check if NINA is currently in a wait state"""
+        if not self.safety_monitor:
+            return
+            
+        try:
+            # Find the latest NINA log file
+            log_file = self.safety_monitor.find_latest_nina_log()
+            if log_file:
+                # Check for wait state
+                old_wait_state = self.nina_wait_state
+                self.nina_wait_state = self.safety_monitor.check_nina_waiting_state(log_file)
+                
+                # Log state changes
+                if self.nina_wait_state != old_wait_state:
+                    if self.nina_wait_state:
+                        self.log_message("⏳ NINA Wait for Time detected")
+                    else:
+                        self.log_message("▶️ NINA Wait completed, resuming normal monitoring")
+        except Exception as e:
+            # Don't log this error every cycle as it's not critical
+            pass
     
     def emergency_shutdown(self):
         """Trigger emergency shutdown"""

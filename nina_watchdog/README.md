@@ -20,7 +20,7 @@ Edit `nina_safety_config.json`:
 
 ### 3. Add to NINA External Scripts
 1. Open NINA → Options → External Scripts
-2. Add new script with path: `C:\Users\aegis\Documents\obsybox\nina_watchdog\nina_watchdog_script.bat`
+2. Add new script with path: `C:\Users\aegis\Documents\obsybox\nina_watchdog\nina_quick_launcher.bat`
 3. Set to run "Before Sequence Start"
 4. Enable "Continue if script fails" for non-blocking operation
 ```powershell
@@ -70,16 +70,18 @@ activate.bat                          # Command prompt version
 - **Status updates** for routine monitoring activities
 
 ### 🚨 Emergency Response
-- **Automatic telescope parking** before dome closure (collision prevention)
-- **Sequential shutdown** with safety interlocks and failure recovery
-- **Manual emergency button** in GUI for immediate shutdown
-- **Enhanced dome failure alerts** with detailed error reporting
+- **Tiered safety timeouts** with smart condition-based responses
+- **51-minute safe timeout**: Stop tracking only (safe conditions)
+- **15-minute dawn timeout**: Park telescope & close dome (past astronomical dawn)
+- **15-minute emergency timeout**: Full shutdown (unsafe weather conditions)
+- **Automatic recovery** when NINA resumes activity
 
 ## Core Files
 
 | File | Purpose |
 |------|---------|
-| `nina_watchdog_script.bat` | **NINA launcher** - main entry point |
+| `nina_quick_launcher.bat` | **NINA launcher** - quick detached startup |
+| `nina_watchdog_script.bat` | **Detailed launcher** - with full diagnostics |
 | `watchdog_safety_gui.py` | **Dark theme GUI** with status monitoring |
 | `emergency_shutdown.py` | **Emergency handler** with ASCOM control |
 | `pushover_notifications.py` | **Mobile alerts** via Pushover API |
@@ -87,6 +89,41 @@ activate.bat                          # Command prompt version
 | `nina_safety_config.json` | **Configuration** with API keys and thresholds |
 | `requirements.txt` | **Dependencies** for virtual environment |
 | `nina_watchdog.ico` | **Custom icon** for professional appearance |
+
+## Tiered Safety Logic
+
+### **🟢 Safe Conditions (51+ minutes inactive)**
+- **Action**: Stop telescope tracking only
+- **Reason**: Conservative safety measure during long inactivity
+- **Recovery**: Automatic when NINA resumes
+
+### **🟡 Past Astronomical Dawn (15+ minutes inactive)**  
+- **Action**: Park telescope AND close dome
+- **Reason**: Protect equipment from daylight exposure
+- **Recovery**: Manual intervention required
+
+### **� Wait State Active**
+- **Display**: Orange "WAIT" status in GUI
+- **Action**: Normal monitoring continues, timeouts extended
+- **Reason**: NINA is in legitimate "Wait for Time" instruction
+- **Recovery**: Automatic when wait completes
+
+### **�🔴 Unsafe Weather (15+ minutes inactive)**
+- **Action**: Emergency shutdown (park + close + alerts)
+- **Reason**: Immediate equipment protection from weather damage
+- **Recovery**: Manual intervention after conditions improve
+
+### **💡 Smart Recovery**
+All automated actions reset when NINA activity resumes, allowing seamless operation continuation.
+
+### **⏳ Wait Detection**
+The system intelligently detects NINA "Wait for Time" instructions and prevents timeouts during legitimate waiting periods:
+- **Automatic detection** of waiting states in NINA logs
+- **NINA log format support**: Handles `2025-11-02T18:57:48.0157|INFO|SequenceItem.cs|Run|208|Starting Category: Utility, Item: WaitForTime`
+- **Smart completion tracking**: Detects `Finishing Category: Utility, Item: WaitForTime` to know when waits end
+- **Configurable grace period** (default: 120 minutes) to prevent indefinite waits
+- **Smart pattern matching** for various wait instruction formats
+- **Seamless integration** with existing safety logic
 
 ## Emergency Procedures
 
@@ -119,6 +156,62 @@ activate.bat                          # Command prompt version
 > **Collision Prevention > Weather Protection**
 
 The system prioritizes preventing mechanical damage (telescope hitting dome) over minor weather exposure. Emergency sequences always park telescope before closing dome, even if weather conditions are deteriorating.
+
+## GUI Status Indicators
+
+### **Main Status Display**
+- **🟢 SYSTEM NOMINAL**: All systems operating normally
+- **🟠 WAIT**: NINA is in "Wait for Time" state (normal operation)
+- **🟡 WARNING**: Minor issues detected (yellow indicators)
+- **🔴 CRITICAL**: Emergency conditions (red indicators)
+
+### **Individual Component Status**
+- **🌐 MQTT Connection**: Weather monitoring link (192.168.1.49:1883)
+- **💻 NINA Process**: NINA application running status
+- **📝 NINA Activity**: Log activity and wait state detection
+- **🌦️ Weather Safety**: ArduSafeMon safety conditions
+- **☀️ Sun Altitude**: Day/night status for imaging safety
+
+### **Color Legend**
+- **🟢 Green**: Normal operation, all good
+- **🟠 Orange**: Wait state active (special status)
+- **🟡 Yellow**: Warning condition, monitoring
+- **🔴 Red**: Error or unsafe condition
+
+## Configuration
+
+### Wait Detection Settings
+The system can detect NINA "Wait for Time" instructions to prevent false timeouts:
+
+```json
+"wait_detection": {
+  "enable_wait_detection": true,
+  "wait_grace_period_minutes": 120,
+  "wait_check_lines": 50
+}
+```
+
+- **`enable_wait_detection`**: Enable/disable automatic wait state detection
+- **`wait_grace_period_minutes`**: Maximum time to extend activity window for waits (default: 120 min)
+- **`wait_check_lines`**: Number of recent log lines to analyze for wait patterns (default: 50)
+
+#### Observatory Location
+```json
+"observatory_location": {
+  "latitude": -35.0,
+  "longitude": 150.0,
+  "elevation_meters": 100,
+  "name": "Your Observatory"
+}
+```
+- **`latitude`**: Observatory latitude in degrees (negative for Southern Hemisphere)
+- **`longitude`**: Observatory longitude in degrees (positive for Eastern Hemisphere)  
+- **`elevation_meters`**: Elevation above sea level in meters
+- **`name`**: Optional observatory name for logging
+
+#### Safety Checks
+
+This prevents the safety monitor from shutting down equipment during legitimate NINA waiting periods while still providing protection against indefinite hangs.
 
 ---
 
