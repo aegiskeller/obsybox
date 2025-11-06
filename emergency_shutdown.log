@@ -1,0 +1,21 @@
+2025-11-06 13:47:16,225 - CRITICAL - === EMERGENCY SHUTDOWN INITIATED ===
+2025-11-06 13:47:16,225 - INFO - Step 1: Stopping telescope...
+2025-11-06 13:47:16,273 - INFO - Connected to telescope: ASCOM.GS.Sky.Telescope
+2025-11-06 13:47:16,277 - INFO - Telescope already parked - AbortSlew not needed
+2025-11-06 13:47:16,278 - INFO - Telescope tracking stopped
+2025-11-06 13:47:16,280 - INFO - Telescope already parked - safe for dome closure
+2025-11-06 13:47:16,281 - INFO - Step 2: Closing dome/roof (telescope is safely parked)...
+2025-11-06 13:47:17,488 - CRITICAL -    1. Manually close dome using physical controls
+2025-11-06 13:47:17,488 - CRITICAL -    2. Check dome power and ASCOM driver connections
+2025-11-06 13:47:17,488 - CRITICAL -    3. Verify dome hardware is operational
+2025-11-06 13:47:17,488 - CRITICAL -    4. Consider emergency power shutdown if dome cannot be closed
+2025-11-06 13:47:17,606 - INFO - Critical dome failure alert sent via MQTT
+2025-11-06 13:47:18,974 - INFO - Critical dome failure alert sent via Pushover
+2025-11-06 13:47:18,974 - INFO - Step 3: Shutting down accessories...
+2025-11-06 13:47:19,002 - INFO - Sent shutdown command to obsybox/dewheater/command
+2025-11-06 13:47:19,002 - INFO - Sent shutdown command to obsybox/power/command
+2025-11-06 13:47:19,002 - INFO - Sent shutdown command to obsybox/safety
+2025-11-06 13:47:19,003 - INFO - Step 4: Stopping NINA process...
+2025-11-06 13:47:19,129 - INFO - NINA process terminated
+2025-11-06 13:47:19,129 - WARNING - === EMERGENCY SHUTDOWN COMPLETED WITH ERRORS ===
+2025-11-06 13:47:19,799 - INFO - Emergency shutdown error notification sent via Pushover
