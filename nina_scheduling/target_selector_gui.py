@@ -611,7 +611,7 @@ class TargetSelectorGUI:
         
         self.export_button = tk.Button(
             buttons_frame,
-            text="💾 Export NINA JSON",
+            text="💾 Export Individual JSON",
             command=self.export_nina_json,
             bg=COLORS['button'],
             fg=COLORS['button_text'],
@@ -622,7 +622,22 @@ class TargetSelectorGUI:
             cursor='hand2',
             state='disabled'
         )
-        self.export_button.pack(side='left', padx=(0, 10))
+        self.export_button.pack(side='left', padx=(0, 5))
+        
+        self.export_night_button = tk.Button(
+            buttons_frame,
+            text="🌙 Export Night Sequence",
+            command=self.export_nina_night_sequence,
+            bg=COLORS['accent'],
+            fg=COLORS['button_text'],
+            font=('Helvetica', 11, 'bold'),
+            relief='flat',
+            padx=20,
+            pady=10,
+            cursor='hand2',
+            state='disabled'
+        )
+        self.export_night_button.pack(side='left', padx=(0, 5))
         
         self.export_csv_button = tk.Button(
             buttons_frame,
@@ -1011,6 +1026,7 @@ class TargetSelectorGUI:
         
         # Enable export buttons
         self.export_button.config(state='normal')
+        self.export_night_button.config(state='normal')
         self.export_csv_button.config(state='normal')
         
         # Plot airmass curves
@@ -1325,6 +1341,42 @@ class TargetSelectorGUI:
         except Exception as e:
             self.log_message(f"Export failed: {str(e)}", 'error')
             messagebox.showerror("Export Error", f"Failed to export NINA JSON:\n{str(e)}")
+    
+    def export_nina_night_sequence(self):
+        """Export selected targets as a single NINA night sequence JSON file"""
+        if not self.selected_targets:
+            messagebox.showwarning("No Targets", "No targets to export. Generate targets first.")
+            return
+        
+        try:
+            # Record targets in database before exporting
+            self.log_message(f"Recording {len(self.selected_targets)} targets in database for {self.observation_date}...", 'info')
+            
+            try:
+                record_scheduled_targets(self.selected_targets, self.observation_date)
+                self.log_message(f"Recorded targets in database", 'success')
+            except Exception as e:
+                self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
+                # Continue with export even if database recording fails
+            
+            # Export NINA night sequence file
+            sequence_file = export_to_nina_json(self.selected_targets, mode="night_sequence")
+            
+            if sequence_file:
+                self.log_message(f"Generated night sequence with {len(self.selected_targets)} targets: {sequence_file}", 'success')
+                messagebox.showinfo(
+                    "Night Sequence Export Successful",
+                    f"Successfully generated night sequence with {len(self.selected_targets)} targets:\n"
+                    f"{sequence_file}\n\n"
+                    f"This single file contains all targets for the night.\n"
+                    f"Targets have been recorded in the database."
+                )
+            else:
+                raise Exception("Failed to generate night sequence file")
+                
+        except Exception as e:
+            self.log_message(f"Night sequence export failed: {str(e)}", 'error')
+            messagebox.showerror("Export Error", f"Failed to export night sequence:\n{str(e)}")
     
     def export_csv(self):
         """Export selected targets as CSV"""
