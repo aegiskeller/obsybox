@@ -181,7 +181,7 @@ void loop()
     tempoffset = 5.0;
   }
   delay(3000);
-}`
+}
 // function that executes whenever data is received from master
 void receiveEvent(int howMany) {
  int i=0;
