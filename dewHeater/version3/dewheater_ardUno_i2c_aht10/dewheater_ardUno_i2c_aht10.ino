@@ -3,7 +3,6 @@
 // the arduino sends the data to the lolin and then
 // the Lolin sends it to the iot Cloud
 #define MOSFETPIN 3 //n-channel- PWM capable
-#define THERMPIN A1  //10k thermistor and 10k resistor (not used for teletemp anymore)
 #define DS18B20_PIN 2
 
 #include "DHT.h"
@@ -16,15 +15,11 @@
 
 #define DHTpin 10 
 #define DHTTYPE DHT11
-#define NUMSAMPLES 10            // how many samples to average in order to smooth reading
 
 DHT dht(DHTpin,DHTTYPE);
 Adafruit_AHTX0 aht10;
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature ds18b20(&oneWire);
-
-//#include <avr/pgmspace.h>
-const int temps[] PROGMEM = { /* ... your lookup table ... */ };
 
 byte DHTdat[5];              //data from DHT11 sensor to be stored in 0.1 humidity% 2.3 degrees C
 float tempoffset = 5.0;          //setpoint offset 
@@ -32,7 +27,6 @@ char offsetmode = 'A'; // use single quotes for char       //default offset
 int ambtemp, ambhum, dptemp; // all measured in 1/10's
 int pwmoutputdefault = 52;   // 10%
 int16_t val = 0;             // the 2 byte value we are going to send over i2c
-int samples[NUMSAMPLES];
 char masterMsg[12]={};
 char sat[10];                // empty array for the number string we send to the master
 char sah[10];
@@ -101,20 +95,6 @@ void loop()
     thermerror = thermerror | 1;
   }
 
-
-  Serial.print(F("Hmdty: "));
-  Serial.print((float)ambhum/10);
-  Serial.print(F("%  AT: "));
-  Serial.print((float)ambtemp/10);
-  Serial.print(F("  TT: "));
-  Serial.print((float)teletemp/10);
-  Serial.print(F("  DP: "));
-  Serial.print((float)dptemp/10);
-  Serial.print(F("  DelT: "));
-  Serial.print(tempoffset);
-  Serial.print(F(" Mode: "));
-  Serial.println(offsetmode);
-
   if (isnan(ambtemp) || isnan(ambhum))
   {
     thermerror = thermerror | 2;
@@ -139,6 +119,22 @@ void loop()
   analogWrite(MOSFETPIN, pwmoutput);
 
   pwmoutput = (pwmoutput * 39) / 100; //scale to %
+
+  // Print status line with all sensor readings and heater percentage
+  Serial.print(F("Hmdty: "));
+  Serial.print((float)ambhum/10);
+  Serial.print(F("%  AT: "));
+  Serial.print((float)ambtemp/10);
+  Serial.print(F("  TT: "));
+  Serial.print((float)teletemp/10);
+  Serial.print(F("  DP: "));
+  Serial.print((float)dptemp/10);
+  Serial.print(F("  DelT: "));
+  Serial.print(tempoffset);
+  Serial.print(F("  HEATR: "));
+  Serial.print(pwmoutput);
+  Serial.print(F("%  Mode: "));
+  Serial.println(offsetmode);
 
   // now we can package the data to a string and then pass it via i2c
   float at = ((float)ambtemp)/10; //converts the float or integer to a string. 
@@ -165,7 +161,6 @@ void loop()
   strcat(dataPacket, sht);
   strcat(dataPacket, ";");
   strcat(dataPacket, sdp);
-  Serial.println(dataPacket);
 
   // write out the message from the master
   Serial.print("mastermsg: ");
@@ -186,8 +181,7 @@ void loop()
     tempoffset = 5.0;
   }
   delay(3000);
-}
-
+}`
 // function that executes whenever data is received from master
 void receiveEvent(int howMany) {
  int i=0;
