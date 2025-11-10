@@ -693,6 +693,82 @@ def local_to_utc(local_time: datetime) -> datetime:
     """Convert local time to UTC"""
     return local_time - timedelta(hours=TIMEZONE_OFFSET)
 
+def calculate_astronomical_dawn(obs_date: date, lat: float, lon: float) -> str:
+    """
+    Calculate astronomical dawn time (sun at -18° altitude) for the next day
+    
+    Args:
+        obs_date: Observation date  
+        lat: Observer latitude in degrees
+        lon: Observer longitude in degrees
+        
+    Returns:
+        Time as "HH:MM" string in LOCAL TIME when sun reaches -18° (astronomical dawn)
+    """
+    # Calculate for the next day (dawn after the observation night)
+    next_day = obs_date + timedelta(days=1)
+    
+    # Use the same calculation as sunset but for dawn (sun rising from -18°)
+    year = next_day.year
+    month = next_day.month
+    day = next_day.day
+    
+    if month <= 2:
+        year -= 1
+        month += 12
+    
+    A = int(year / 100)
+    B = 2 - A + int(A / 4)
+    jd = int(365.25 * (year + 4716)) + int(30.6001 * (month + 1)) + day + B - 1524.5
+    
+    # Number of days since J2000.0
+    n = jd - 2451545.0
+    
+    # Mean solar time
+    J_star = n - lon / 360.0
+    
+    # Solar mean anomaly
+    M = (357.5291 + 0.98560028 * J_star) % 360
+    M_rad = math.radians(M)
+    
+    # Equation of center
+    C = 1.9148 * math.sin(M_rad) + 0.0200 * math.sin(2 * M_rad) + 0.0003 * math.sin(3 * M_rad)
+    
+    # Ecliptic longitude
+    lambda_sun = (M + C + 180 + 102.9372) % 360
+    
+    # Solar transit
+    J_transit = 2451545.0 + J_star + 0.0053 * math.sin(M_rad) - 0.0069 * math.sin(2 * math.radians(lambda_sun))
+    
+    # Declination of the sun
+    sin_dec = math.sin(math.radians(lambda_sun)) * math.sin(math.radians(23.44))
+    cos_dec = math.sqrt(1 - sin_dec**2)
+    
+    # Hour angle for astronomical twilight (-18°)
+    lat_rad = math.radians(lat)
+    sun_alt_rad = math.radians(-18.0)
+    
+    cos_omega = (math.sin(sun_alt_rad) - math.sin(lat_rad) * sin_dec) / (math.cos(lat_rad) * cos_dec)
+    
+    # Check if sun reaches this altitude
+    if cos_omega > 1:
+        return "06:00"  # Default if sun doesn't reach -18° (polar regions)
+    elif cos_omega < -1:
+        return "06:00"  # Default if sun doesn't reach -18°
+    
+    omega = math.degrees(math.acos(cos_omega))
+    
+    # Time when sun reaches -18° altitude (rising/dawn)
+    J_rise = J_transit - omega / 360.0
+    
+    # Convert to local time
+    dawn_hour = ((J_rise - jd) * 24 + 12 + TIMEZONE_OFFSET) % 24
+    
+    hours = int(dawn_hour)
+    minutes = int((dawn_hour - hours) * 60)
+    
+    return f"{hours:02d}:{minutes:02d}"
+
 def calculate_sunset_time(obs_date: date, lat: float, lon: float, sun_altitude: float = -15.0) -> str:
     """
     Calculate the time when sun reaches a specific altitude below horizon
@@ -1597,11 +1673,12 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         replace(obj)
         return obj
     
-    for target in targets:
+    for i, target in enumerate(targets):
         target_name = target.get('name', 'Unknown')
         ra_str = target.get('ra', '00:00:00')
         dec_str = target.get('dec', '+00:00:00')
         minima_time = target.get('minimum_time', '')
+        is_last_target = (i == len(targets) - 1)  # Check if this is the last target
         
         # Parse RA (HH:MM:SS.SS format)
         ra_parts = ra_str.split(':')
@@ -1627,16 +1704,34 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
             start_time = minima_datetime - timedelta(hours=2)
             start_hours = start_time.hour
             start_minutes = start_time.minute
-            # End 2 hours AFTER minima (not start + fixed window)
-            end_time = minima_datetime + timedelta(hours=2)
-            end_hours = end_time.hour
-            end_minutes = end_time.minute
+            
+            if is_last_target:
+                # For the last target, set end time to astronomical dawn
+                obs_date = minima_datetime.date()
+                dawn_time_str = calculate_astronomical_dawn(obs_date, LATITUDE, LONGITUDE)
+                dawn_parts = dawn_time_str.split(':')
+                end_hours = int(dawn_parts[0])
+                end_minutes = int(dawn_parts[1])
+                logger.info(f"Last target {target_name}: end time set to astronomical dawn at {dawn_time_str}")
+            else:
+                # End 2 hours AFTER minima (not start + fixed window)
+                end_time = minima_datetime + timedelta(hours=2)
+                end_hours = end_time.hour
+                end_minutes = end_time.minute
         else:
             # Default to 20:00 if no time available
             start_hours = 20
             start_minutes = 0
-            end_hours = 0
-            end_minutes = 0
+            if is_last_target:
+                # For last target with no minima time, use astronomical dawn
+                today = date.today()
+                dawn_time_str = calculate_astronomical_dawn(today, LATITUDE, LONGITUDE)
+                dawn_parts = dawn_time_str.split(':')
+                end_hours = int(dawn_parts[0])
+                end_minutes = int(dawn_parts[1])
+            else:
+                end_hours = 0
+                end_minutes = 0
         
         # Calculate exposure time based on magnitude
         mag_max_str = target.get('mag_max', '12.0')
@@ -1671,9 +1766,10 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_coordinates(item, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s)
         
-        # Helper function to update START time condition (in Target Imaging Instructions container)
-        def update_start_time_condition(obj, hours, minutes):
-            """Find and update TimeCondition in SequentialContainer for start time"""
+        # Helper function to update END time condition (in Target Imaging Instructions container)
+        # This is actually the loop end time, not the start time as previously thought
+        def update_end_time_condition(obj, hours, minutes):
+            """Find and update TimeCondition in SequentialContainer for end time"""
             if isinstance(obj, dict):
                 # Look for SequentialContainer with name "Target Imaging Instructions"
                 if (obj.get("$type") == "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer" and 
@@ -1686,13 +1782,13 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                         if condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
                             condition["Hours"] = hours
                             condition["Minutes"] = minutes
-                            logger.debug(f"Set start time condition: {hours:02d}:{minutes:02d}")
+                            logger.debug(f"Set end time condition: {hours:02d}:{minutes:02d}")
                 else:
                     for value in obj.values():
-                        update_start_time_condition(value, hours, minutes)
+                        update_end_time_condition(value, hours, minutes)
             elif isinstance(obj, list):
                 for item in obj:
-                    update_start_time_condition(item, hours, minutes)
+                    update_end_time_condition(item, hours, minutes)
         
         # Helper function to update exposure time
         def update_exposure_time(obj, exp_time):
@@ -1770,6 +1866,23 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_center_after_drift(item, distance_arcmin)
         
+        # Helper function to update Pushover message for last target
+        def update_pushover_message(obj, title, message):
+            """Recursively find and update SendToPushover title and message"""
+            if isinstance(obj, dict):
+                if obj.get("$type") == "DaleGhent.NINA.GroundStation.SendToPushover.SendToPushover, DaleGhent.NINA.GroundStation":
+                    # Only update the one with "done" in the title (not the safety ones)
+                    if "$$TARGET_NAME$$" in obj.get("Title", ""):
+                        obj["Title"] = title
+                        obj["Message"] = message
+                        logger.debug(f"Updated Pushover: {title} - {message}")
+                else:
+                    for value in obj.values():
+                        update_pushover_message(value, title, message)
+            elif isinstance(obj, list):
+                for item in obj:
+                    update_pushover_message(item, title, message)
+        
         # Update top-level target information
         if "Target" in nina_json:
             nina_json["Target"]["TargetName"] = target_name
@@ -1778,8 +1891,8 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         # Update all coordinates in the template
         update_coordinates(nina_json, ra_hours, ra_minutes, ra_seconds, dec_negative, dec_degrees, dec_minutes, dec_seconds)
         
-        # Update START time condition (observation start time) in Target Imaging Instructions container
-        update_start_time_condition(nina_json, start_hours, start_minutes)
+        # Update END time condition (observation end time) in Target Imaging Instructions container
+        update_end_time_condition(nina_json, end_hours, end_minutes)
         
         # Update loop condition and END time (will loop until manually stopped or other conditions met)
         if minima_datetime:
@@ -1790,6 +1903,11 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         
         # Update center after drift tolerance
         update_center_after_drift(nina_json, CENTER_AFTER_DRIFT_ARCMIN)
+        
+        # Update Pushover message for last target
+        if is_last_target:
+            update_pushover_message(nina_json, "$$TARGET_NAME$$ done", "done for the night")
+            logger.info(f"Updated Pushover message for last target: {target_name}")
         
         
         # Save to file
