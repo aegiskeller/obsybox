@@ -182,7 +182,20 @@ def publish_json(payload_json: str):
     return 2
 
 def main(argv):
-    drive = 'D:'
+    # Auto-detect drive based on hostname, with command line override
+    hostname = socket.gethostname().lower()
+    
+    # Define drive mappings per hostname
+    drive_mappings = {
+        'piglet': 'C:',
+        # Add other hostnames here as needed
+        # 'othermachine': 'D:',
+    }
+    
+    # Default to D: for unmapped machines
+    drive = drive_mappings.get(hostname, 'D:')
+    
+    # Command line argument overrides auto-detection
     if len(argv) >= 2:
         drive = argv[1]
 

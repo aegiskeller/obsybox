@@ -51,6 +51,7 @@ try:
     MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
     TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
     ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+    ALLOW_G_TARGETS = config['ALLOW_G_TARGETS']
 except ImportError:
     # Fallback to importing from findTargets if config module not available
     from findTargets import (
@@ -59,6 +60,7 @@ except ImportError:
         OBSERVATION_WINDOW, MIN_ALTITUDE_DURING_OBS, TARGET_SPACING,
         CENTER_AFTER_DRIFT_ARCMIN, MAX_TARGETS_PER_NIGHT, TIMEZONE_OFFSET
     )
+    ALLOW_G_TARGETS = True  # Default fallback value
 
 # Midnight color scheme
 COLORS = {
@@ -288,6 +290,9 @@ class TargetSelectorGUI:
         # Azimuth settings card (checkboxes)
         self.create_azimuth_card(scrollable_frame)
         
+        # Target constraints card (checkboxes)
+        self.create_target_constraints_card(scrollable_frame)
+        
         # Date display and Generate button
         button_frame = tk.Frame(scrollable_frame, bg=COLORS['bg_dark'])
         button_frame.pack(fill='x', padx=20, pady=20)
@@ -484,6 +489,49 @@ class TargetSelectorGUI:
         # Bottom padding
         tk.Frame(card, bg=COLORS['bg_light'], height=10).pack()
     
+    def create_target_constraints_card(self, parent):
+        """Create target constraints card with checkboxes"""
+        card = tk.Frame(parent, bg=COLORS['bg_light'], relief='flat')
+        card.pack(fill='x', padx=20, pady=10)
+        
+        # Title
+        title_label = tk.Label(
+            card,
+            text="🎯 Target Constraints",
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            font=('Helvetica', 12, 'bold')
+        )
+        title_label.pack(anchor='w', padx=15, pady=(15, 10))
+        
+        # Checkbox frame
+        checkbox_frame = tk.Frame(card, bg=COLORS['bg_light'])
+        checkbox_frame.pack(fill='x', padx=15, pady=5)
+        
+        # G-targets checkbox
+        self.allow_g_targets_var = tk.BooleanVar(value=ALLOW_G_TARGETS)
+        
+        g_targets_cb = tk.Checkbutton(
+            checkbox_frame,
+            text="Allow Gxxxx.yyyyy targets",
+            variable=self.allow_g_targets_var,
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            selectcolor=COLORS['bg_medium'],
+            activebackground=COLORS['bg_light'],
+            activeforeground=COLORS['text'],
+            font=('Helvetica', 10)
+        )
+        g_targets_cb.pack(side='left', padx=10, pady=5)
+        
+        # Add tooltip for explanation
+        self.create_tooltip(g_targets_cb, 
+            "When unchecked, excludes catalog targets of the form 'G1234.56789' "
+            "from target selection. These are typically WDS double star catalog entries.")
+        
+        # Bottom padding
+        tk.Frame(card, bg=COLORS['bg_light'], height=10).pack()
+    
     def create_tooltip(self, widget, text):
         """Create a tooltip for a widget"""
         def show_tooltip(event):
@@ -563,7 +611,7 @@ class TargetSelectorGUI:
         
         self.export_button = tk.Button(
             buttons_frame,
-            text="💾 Export NINA JSON",
+            text="💾 Export Individual JSON",
             command=self.export_nina_json,
             bg=COLORS['button'],
             fg=COLORS['button_text'],
@@ -574,7 +622,22 @@ class TargetSelectorGUI:
             cursor='hand2',
             state='disabled'
         )
-        self.export_button.pack(side='left', padx=(0, 10))
+        self.export_button.pack(side='left', padx=(0, 5))
+        
+        self.export_night_button = tk.Button(
+            buttons_frame,
+            text="🌙 Export Night Sequence",
+            command=self.export_nina_night_sequence,
+            bg=COLORS['accent'],
+            fg=COLORS['button_text'],
+            font=('Helvetica', 11, 'bold'),
+            relief='flat',
+            padx=20,
+            pady=10,
+            cursor='hand2',
+            state='disabled'
+        )
+        self.export_night_button.pack(side='left', padx=(0, 5))
         
         self.export_csv_button = tk.Button(
             buttons_frame,
@@ -771,6 +834,9 @@ class TargetSelectorGUI:
             for az, var in self.azimuth_vars.items():
                 var.set(az in default_azimuths)
             
+            # Reset target constraints checkboxes
+            self.allow_g_targets_var.set(DEFAULT_CONFIG['target_constraints']['allow_g_targets'])
+            
             self.log_message("All parameters reset to defaults", 'info')
             
         except ImportError:
@@ -844,7 +910,8 @@ class TargetSelectorGUI:
                 'observation_window': float(self.entries['obs_window'].get()),
                 'target_spacing': float(self.entries['target_spacing'].get()),
                 'max_targets_per_night': int(self.entries['max_targets'].get()),
-                'allowed_azimuths': [az for az, var in self.azimuth_vars.items() if var.get()]
+                'allowed_azimuths': [az for az, var in self.azimuth_vars.items() if var.get()],
+                'allow_g_targets': self.allow_g_targets_var.get()
             }
             
             # Save configuration to persistent storage
@@ -873,6 +940,7 @@ class TargetSelectorGUI:
             findTargets.MAX_TARGETS_PER_NIGHT = gui_values['max_targets_per_night']
             findTargets.TIMEZONE_OFFSET = int(self.entries['timezone'].get())
             findTargets.ALLOWED_AZIMUTHS = gui_values['allowed_azimuths']
+            findTargets.ALLOW_G_TARGETS = gui_values['allow_g_targets']
             
             self.log_message(f"Configuration: Lat={findTargets.LATITUDE}, Lon={findTargets.LONGITUDE}", 'info')
             
@@ -958,6 +1026,7 @@ class TargetSelectorGUI:
         
         # Enable export buttons
         self.export_button.config(state='normal')
+        self.export_night_button.config(state='normal')
         self.export_csv_button.config(state='normal')
         
         # Plot airmass curves
@@ -1272,6 +1341,42 @@ class TargetSelectorGUI:
         except Exception as e:
             self.log_message(f"Export failed: {str(e)}", 'error')
             messagebox.showerror("Export Error", f"Failed to export NINA JSON:\n{str(e)}")
+    
+    def export_nina_night_sequence(self):
+        """Export selected targets as a single NINA night sequence JSON file"""
+        if not self.selected_targets:
+            messagebox.showwarning("No Targets", "No targets to export. Generate targets first.")
+            return
+        
+        try:
+            # Record targets in database before exporting
+            self.log_message(f"Recording {len(self.selected_targets)} targets in database for {self.observation_date}...", 'info')
+            
+            try:
+                record_scheduled_targets(self.selected_targets, self.observation_date)
+                self.log_message(f"Recorded targets in database", 'success')
+            except Exception as e:
+                self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
+                # Continue with export even if database recording fails
+            
+            # Export NINA night sequence file
+            sequence_file = export_to_nina_json(self.selected_targets, mode="night_sequence")
+            
+            if sequence_file:
+                self.log_message(f"Generated night sequence with {len(self.selected_targets)} targets: {sequence_file}", 'success')
+                messagebox.showinfo(
+                    "Night Sequence Export Successful",
+                    f"Successfully generated night sequence with {len(self.selected_targets)} targets:\n"
+                    f"{sequence_file}\n\n"
+                    f"This single file contains all targets for the night.\n"
+                    f"Targets have been recorded in the database."
+                )
+            else:
+                raise Exception("Failed to generate night sequence file")
+                
+        except Exception as e:
+            self.log_message(f"Night sequence export failed: {str(e)}", 'error')
+            messagebox.showerror("Export Error", f"Failed to export night sequence:\n{str(e)}")
     
     def export_csv(self):
         """Export selected targets as CSV"""

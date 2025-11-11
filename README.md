@@ -104,6 +104,37 @@ portainer-ce   portainer/portainer-ce   "/portainer"             portainer-ce   
 |obsybox/opir_sensor|Arduino MKR 1010 Wifi|{"lux":143.56,"sky":11.81,"ambient":17.13,"ir":726,"full":2078,"aht_temp":16.20,"aht_hum":43.27}|
 |obsybox/power_usage| Tapo P110 plug from 192.168.1.49 once a minute; on rpis50| ip, power, timestamp|
 
+## NINA Safety Monitor
+
+The `nina_safetymon/` directory contains a comprehensive safety monitoring system for NINA astrophotography software. This system protects expensive observatory equipment by detecting when NINA becomes unresponsive and automatically triggering emergency shutdown procedures.
+
+### Key Features
+- **Continuous Monitoring**: Watches NINA process status and log file activity
+- **Emergency Shutdown**: Automatically stops telescope, closes dome, and shuts down accessories
+- **MQTT Integration**: Uses existing obsybox MQTT infrastructure for alerts and control
+- **Weather Integration**: Integrates with ArduSafeMon weather safety monitoring
+- **Multiple Detection Methods**: Process monitoring, log analysis, and optional heartbeat integration
+
+### Quick Start
+```powershell
+cd nina_safetymon
+python -m venv venv                                       # Create virtual environment
+.\venv\Scripts\python.exe -m pip install -r requirements.txt  # Install dependencies
+.\venv\Scripts\python.exe setup.py                       # Verify setup
+.\venv\Scripts\python.exe nina_safety_monitor.py         # Test run
+install_safety_service.bat                               # Install as service (run as Admin)
+```
+
+### Safety Actions
+When NINA becomes unresponsive, the system automatically:
+1. Stops telescope tracking and aborts slews via ASCOM
+2. Closes dome/roof using ASCOM drivers  
+3. Shuts down dew heaters and accessories via MQTT
+4. Terminates NINA process if still running
+5. Logs all actions and sends MQTT alerts
+
+See `nina_safetymon/README.md` for detailed setup and configuration instructions.
+
 ## Windows deployment (quick)
 
 We include helper files to deploy `get_system_stats.py` on Windows using Task Scheduler.

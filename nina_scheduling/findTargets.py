@@ -62,6 +62,7 @@ try:
     MAX_TARGETS_PER_NIGHT = config['MAX_TARGETS_PER_NIGHT']
     TIMEZONE_OFFSET = config['TIMEZONE_OFFSET']
     ALLOWED_AZIMUTHS = config['ALLOWED_AZIMUTHS']
+    ALLOW_G_TARGETS = config['ALLOW_G_TARGETS']
     NINA_EXPORT_BASE_DIR = config['NINA_EXPORT_BASE_DIR']
 except ImportError:
     logger.warning("Config module not found, using hardcoded defaults")
@@ -80,6 +81,7 @@ except ImportError:
     MAX_TARGETS_PER_NIGHT = 2
     TIMEZONE_OFFSET = 10
     ALLOWED_AZIMUTHS = ['N', 'NE', 'NW', 'E', 'W']
+    ALLOW_G_TARGETS = True
     NINA_EXPORT_BASE_DIR = r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
 
 # Web scraping configuration
@@ -88,12 +90,14 @@ USERNAME = VARASTRO_USERNAME
 PASSWORD = VARASTRO_PASSWORD
 
 # NINA template configuration
-NINA_TEMPLATE_FILE = "C:\\Users\\aegis\\Documents\\N.I.N.A\\Templates\\varstarTemplate.template.json"  # Template file for NINA JSON generation
+NINA_TEMPLATE_FILE = "G6432.00592.template.json"  # Template file for NINA JSON generation (relative to script directory)
 # check if the template file exists
-if not Path(NINA_TEMPLATE_FILE).exists():
-    logger.error(f"NINA template file not found: {NINA_TEMPLATE_FILE}") 
+template_path = Path(__file__).parent / NINA_TEMPLATE_FILE
+if not template_path.exists():
+    logger.error(f"NINA template file not found: {template_path}") 
     # Handle the error (e.g., exit or use a default template)
-    sys.exit(1) 
+    # For development, we'll continue without exiting
+    logger.warning("Continuing without template - functions may fail") 
 
 # Fixed parameters (not user-configurable)
 SUNSET_TIME = "20:00"  # Default sunset time LOCAL TIME
@@ -535,11 +539,23 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
         'altitude_filtered': 0,
         'azimuth_filtered': 0,
         'declination_filtered': 0,
+        'g_targets_filtered': 0,
         'passed': 0
     }
     
     for target in targets:
         passed = True
+        
+        # Filter by G-targets if not allowed
+        if not ALLOW_G_TARGETS:
+            target_name = target.get('name', '')
+            if target_name.startswith('G') and '.' in target_name:
+                # Check if it matches the pattern Gnnnn.nnnnn (G followed by digits, dot, digits)
+                import re
+                if re.match(r'^G\d+\.\d+', target_name):
+                    stats['g_targets_filtered'] += 1
+                    passed = False
+                    continue
         
         # Filter by magnitude
         try:
@@ -590,7 +606,8 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
     logger.info(f"Filter stats: {stats['passed']} passed, "
                 f"{stats['magnitude_filtered']} filtered by magnitude, "
                 f"{stats['altitude_filtered']} filtered by altitude, "
-                f"{stats['azimuth_filtered']} filtered by azimuth")
+                f"{stats['azimuth_filtered']} filtered by azimuth, "
+                f"{stats['g_targets_filtered']} G-targets filtered")
     
     return filtered
 
@@ -677,6 +694,82 @@ def utc_to_local(utc_time: datetime) -> datetime:
 def local_to_utc(local_time: datetime) -> datetime:
     """Convert local time to UTC"""
     return local_time - timedelta(hours=TIMEZONE_OFFSET)
+
+def calculate_astronomical_dawn(obs_date: date, lat: float, lon: float) -> str:
+    """
+    Calculate astronomical dawn time (sun at -18° altitude) for the next day
+    
+    Args:
+        obs_date: Observation date  
+        lat: Observer latitude in degrees
+        lon: Observer longitude in degrees
+        
+    Returns:
+        Time as "HH:MM" string in LOCAL TIME when sun reaches -18° (astronomical dawn)
+    """
+    # Calculate for the next day (dawn after the observation night)
+    next_day = obs_date + timedelta(days=1)
+    
+    # Use the same calculation as sunset but for dawn (sun rising from -18°)
+    year = next_day.year
+    month = next_day.month
+    day = next_day.day
+    
+    if month <= 2:
+        year -= 1
+        month += 12
+    
+    A = int(year / 100)
+    B = 2 - A + int(A / 4)
+    jd = int(365.25 * (year + 4716)) + int(30.6001 * (month + 1)) + day + B - 1524.5
+    
+    # Number of days since J2000.0
+    n = jd - 2451545.0
+    
+    # Mean solar time
+    J_star = n - lon / 360.0
+    
+    # Solar mean anomaly
+    M = (357.5291 + 0.98560028 * J_star) % 360
+    M_rad = math.radians(M)
+    
+    # Equation of center
+    C = 1.9148 * math.sin(M_rad) + 0.0200 * math.sin(2 * M_rad) + 0.0003 * math.sin(3 * M_rad)
+    
+    # Ecliptic longitude
+    lambda_sun = (M + C + 180 + 102.9372) % 360
+    
+    # Solar transit
+    J_transit = 2451545.0 + J_star + 0.0053 * math.sin(M_rad) - 0.0069 * math.sin(2 * math.radians(lambda_sun))
+    
+    # Declination of the sun
+    sin_dec = math.sin(math.radians(lambda_sun)) * math.sin(math.radians(23.44))
+    cos_dec = math.sqrt(1 - sin_dec**2)
+    
+    # Hour angle for astronomical twilight (-18°)
+    lat_rad = math.radians(lat)
+    sun_alt_rad = math.radians(-18.0)
+    
+    cos_omega = (math.sin(sun_alt_rad) - math.sin(lat_rad) * sin_dec) / (math.cos(lat_rad) * cos_dec)
+    
+    # Check if sun reaches this altitude
+    if cos_omega > 1:
+        return "06:00"  # Default if sun doesn't reach -18° (polar regions)
+    elif cos_omega < -1:
+        return "06:00"  # Default if sun doesn't reach -18°
+    
+    omega = math.degrees(math.acos(cos_omega))
+    
+    # Time when sun reaches -18° altitude (rising/dawn)
+    J_rise = J_transit - omega / 360.0
+    
+    # Convert to local time
+    dawn_hour = ((J_rise - jd) * 24 + 12 + TIMEZONE_OFFSET) % 24
+    
+    hours = int(dawn_hour)
+    minutes = int((dawn_hour - hours) * 60)
+    
+    return f"{hours:02d}:{minutes:02d}"
 
 def calculate_sunset_time(obs_date: date, lat: float, lon: float, sun_altitude: float = -15.0) -> str:
     """
@@ -1473,15 +1566,23 @@ def export_to_nina_format(targets: List[Dict], output_path: Path = None):
         json.dump(json_targets, f, indent=2, ensure_ascii=False)
     logger.info(f"Also saved JSON version: {json_path}")
 
-def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_file: str = None):
+def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_file: str = None, mode: str = "individual"):
     """
-    Export targets to NINA Deep Sky Object Container JSON format using a template
+    Export targets to NINA JSON format using a template
     
     Args:
         targets: List of target dictionaries
         output_dir: Directory to save the JSON files (default: NINA VarStars directory with date)
         template_file: Path to template JSON file (default: NINA_TEMPLATE_FILE config)
+        mode: Export mode - "individual" for separate files per target, "night_sequence" for single night sequence
+    
+    Returns:
+        List of created file paths for individual mode, single file path for night_sequence mode, or None if failed
     """
+    if mode == "night_sequence":
+        return export_to_nina_night_sequence(targets, output_dir, template_file)
+    
+    # Continue with original individual file export logic
     if output_dir is None:
         # Create date-based directory structure using configurable base path
         today = date.today()
@@ -1511,6 +1612,8 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         return
     
     logger.info(f"Exporting {len(targets)} targets to NINA JSON format in {output_dir}")
+    
+    created_files = []  # Track created files for return value
 
     def _normalize_nina_ids(obj: Any) -> Any:
         """
@@ -1582,11 +1685,12 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         replace(obj)
         return obj
     
-    for target in targets:
+    for i, target in enumerate(targets):
         target_name = target.get('name', 'Unknown')
         ra_str = target.get('ra', '00:00:00')
         dec_str = target.get('dec', '+00:00:00')
         minima_time = target.get('minimum_time', '')
+        is_last_target = (i == len(targets) - 1)  # Check if this is the last target
         
         # Parse RA (HH:MM:SS.SS format)
         ra_parts = ra_str.split(':')
@@ -1612,16 +1716,34 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
             start_time = minima_datetime - timedelta(hours=2)
             start_hours = start_time.hour
             start_minutes = start_time.minute
-            # End 2 hours AFTER minima (not start + fixed window)
-            end_time = minima_datetime + timedelta(hours=2)
-            end_hours = end_time.hour
-            end_minutes = end_time.minute
+            
+            if is_last_target:
+                # For the last target, set end time to astronomical dawn
+                obs_date = minima_datetime.date()
+                dawn_time_str = calculate_astronomical_dawn(obs_date, LATITUDE, LONGITUDE)
+                dawn_parts = dawn_time_str.split(':')
+                end_hours = int(dawn_parts[0])
+                end_minutes = int(dawn_parts[1])
+                logger.info(f"Last target {target_name}: end time set to astronomical dawn at {dawn_time_str}")
+            else:
+                # End 2 hours AFTER minima (not start + fixed window)
+                end_time = minima_datetime + timedelta(hours=2)
+                end_hours = end_time.hour
+                end_minutes = end_time.minute
         else:
             # Default to 20:00 if no time available
             start_hours = 20
             start_minutes = 0
-            end_hours = 0
-            end_minutes = 0
+            if is_last_target:
+                # For last target with no minima time, use astronomical dawn
+                today = date.today()
+                dawn_time_str = calculate_astronomical_dawn(today, LATITUDE, LONGITUDE)
+                dawn_parts = dawn_time_str.split(':')
+                end_hours = int(dawn_parts[0])
+                end_minutes = int(dawn_parts[1])
+            else:
+                end_hours = 0
+                end_minutes = 0
         
         # Calculate exposure time based on magnitude
         mag_max_str = target.get('mag_max', '12.0')
@@ -1656,9 +1778,10 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_coordinates(item, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s)
         
-        # Helper function to update START time condition (in Target Imaging Instructions container)
-        def update_start_time_condition(obj, hours, minutes):
-            """Find and update TimeCondition in SequentialContainer for start time"""
+        # Helper function to update END time condition (in Target Imaging Instructions container)
+        # This is actually the loop end time, not the start time as previously thought
+        def update_end_time_condition(obj, hours, minutes):
+            """Find and update TimeCondition in SequentialContainer for end time"""
             if isinstance(obj, dict):
                 # Look for SequentialContainer with name "Target Imaging Instructions"
                 if (obj.get("$type") == "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer" and 
@@ -1671,13 +1794,13 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                         if condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
                             condition["Hours"] = hours
                             condition["Minutes"] = minutes
-                            logger.debug(f"Set start time condition: {hours:02d}:{minutes:02d}")
+                            logger.debug(f"Set end time condition: {hours:02d}:{minutes:02d}")
                 else:
                     for value in obj.values():
-                        update_start_time_condition(value, hours, minutes)
+                        update_end_time_condition(value, hours, minutes)
             elif isinstance(obj, list):
                 for item in obj:
-                    update_start_time_condition(item, hours, minutes)
+                    update_end_time_condition(item, hours, minutes)
         
         # Helper function to update exposure time
         def update_exposure_time(obj, exp_time):
@@ -1755,6 +1878,23 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 for item in obj:
                     update_center_after_drift(item, distance_arcmin)
         
+        # Helper function to update Pushover message for last target
+        def update_pushover_message(obj, title, message):
+            """Recursively find and update SendToPushover title and message"""
+            if isinstance(obj, dict):
+                if obj.get("$type") == "DaleGhent.NINA.GroundStation.SendToPushover.SendToPushover, DaleGhent.NINA.GroundStation":
+                    # Only update the one with "done" in the title (not the safety ones)
+                    if "$$TARGET_NAME$$" in obj.get("Title", ""):
+                        obj["Title"] = title
+                        obj["Message"] = message
+                        logger.debug(f"Updated Pushover: {title} - {message}")
+                else:
+                    for value in obj.values():
+                        update_pushover_message(value, title, message)
+            elif isinstance(obj, list):
+                for item in obj:
+                    update_pushover_message(item, title, message)
+        
         # Update top-level target information
         if "Target" in nina_json:
             nina_json["Target"]["TargetName"] = target_name
@@ -1763,8 +1903,8 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         # Update all coordinates in the template
         update_coordinates(nina_json, ra_hours, ra_minutes, ra_seconds, dec_negative, dec_degrees, dec_minutes, dec_seconds)
         
-        # Update START time condition (observation start time) in Target Imaging Instructions container
-        update_start_time_condition(nina_json, start_hours, start_minutes)
+        # Update END time condition (observation end time) in Target Imaging Instructions container
+        update_end_time_condition(nina_json, end_hours, end_minutes)
         
         # Update loop condition and END time (will loop until manually stopped or other conditions met)
         if minima_datetime:
@@ -1775,6 +1915,11 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         
         # Update center after drift tolerance
         update_center_after_drift(nina_json, CENTER_AFTER_DRIFT_ARCMIN)
+        
+        # Update Pushover message for last target
+        if is_last_target:
+            update_pushover_message(nina_json, "$$TARGET_NAME$$ done", "done for the night")
+            logger.info(f"Updated Pushover message for last target: {target_name}")
         
         
         # Save to file
@@ -1787,9 +1932,292 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(nina_json, f, indent=2, ensure_ascii=False)
         
+        created_files.append(filepath)  # Add to list of created files
         logger.info(f"Created NINA target file: {filepath}")
     
     logger.info(f"Exported {len(targets)} NINA JSON files")
+    return created_files  # Return list of created files
+
+
+def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, template_file: str = None, night_template_file: str = None):
+    """
+    Export targets to a single NINA night sequence JSON format
+    
+    Args:
+        targets: List of target dictionaries
+        output_dir: Directory to save the JSON file (default: NINA VarStars directory with date)
+        template_file: Path to individual target template JSON file (default: NINA_TEMPLATE_FILE config)
+        night_template_file: Path to night sequence template JSON file (default: night_sequence.template.json)
+    
+    Returns:
+        Path to created night sequence file, or None if failed
+    """
+    if output_dir is None:
+        # Create date-based directory structure using configurable base path
+        today = date.today()
+        date_str = today.strftime('%Y%m%d')  # Format: 20251102
+        output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+        
+    # Always ensure the output directory exists (whether default or custom)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Created output directory: {output_dir}")
+    
+    if template_file is None:
+        template_file = NINA_TEMPLATE_FILE
+    if night_template_file is None:
+        night_template_file = "night_sequence.template.json"
+    
+    # Load individual target template
+    target_template_path = Path(__file__).parent / template_file
+    if not target_template_path.exists():
+        logger.error(f"Target template file not found: {target_template_path}")
+        return None
+    
+    # Load night sequence template
+    night_template_path = Path(__file__).parent / night_template_file
+    if not night_template_path.exists():
+        logger.error(f"Night template file not found: {night_template_path}")
+        return None
+    
+    try:
+        with open(target_template_path, 'r', encoding='utf-8') as f:
+            target_template = json.load(f)
+        with open(night_template_path, 'r', encoding='utf-8') as f:
+            night_template = json.load(f)
+        logger.info(f"Loaded templates from {target_template_path} and {night_template_path}")
+    except Exception as e:
+        logger.error(f"Failed to load template files: {e}")
+        return None
+    
+    logger.info(f"Generating night sequence with {len(targets)} targets")
+
+    # Helper function to normalize IDs (reuse from existing function)
+    def _normalize_nina_ids(obj: Any) -> Any:
+        """Ensure all "$id" values are unique and "$ref" references updated."""
+        mapping_by_obj = {}
+        first_new_for_old = {}
+        next_id = 1
+
+        def assign(o):
+            nonlocal next_id
+            if isinstance(o, dict):
+                if "$id" in o:
+                    old = o["$id"]
+                    new = str(next_id)
+                    obj_id = id(o)
+                    if obj_id not in mapping_by_obj:
+                        mapping_by_obj[obj_id] = new
+                        if old not in first_new_for_old:
+                            first_new_for_old[old] = new
+                        next_id += 1
+                for v in o.values():
+                    assign(v)
+            elif isinstance(o, list):
+                for v in o:
+                    assign(v)
+
+        assign(obj)
+
+        def replace(o):
+            if isinstance(o, dict):
+                if "$id" in o:
+                    obj_id = id(o)
+                    if obj_id in mapping_by_obj:
+                        o["$id"] = mapping_by_obj[obj_id]
+                    else:
+                        logger.warning(f"Found object with $id but no mapping: {o.get('$type', 'unknown')}")
+                        del o["$id"]
+                if "$ref" in o:
+                    oldref = o["$ref"]
+                    if oldref in first_new_for_old:
+                        o["$ref"] = first_new_for_old[oldref]
+                    else:
+                        logger.warning(f"Found $ref to non-existent ID: {oldref}")
+                for v in o.values():
+                    replace(v)
+            elif isinstance(o, list):
+                for v in o:
+                    replace(v)
+
+        replace(obj)
+        return obj
+
+    # Helper functions from original export function
+    def update_coordinates(obj, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s):
+        """Recursively find and update InputCoordinates in the JSON structure"""
+        if isinstance(obj, dict):
+            if obj.get("$type") == "NINA.Astrometry.InputCoordinates, NINA.Astrometry":
+                obj["RAHours"] = ra_h
+                obj["RAMinutes"] = ra_m
+                obj["RASeconds"] = ra_s
+                obj["NegativeDec"] = dec_neg
+                obj["DecDegrees"] = dec_d
+                obj["DecMinutes"] = dec_m
+                obj["DecSeconds"] = dec_s
+            else:
+                for value in obj.values():
+                    update_coordinates(value, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s)
+        elif isinstance(obj, list):
+            for item in obj:
+                update_coordinates(item, ra_h, ra_m, ra_s, dec_neg, dec_d, dec_m, dec_s)
+
+    def update_exposure_time(obj, exp_time):
+        """Recursively find and update TakeExposure ExposureTime in the JSON structure"""
+        if isinstance(obj, dict):
+            if obj.get("$type") == "NINA.Sequencer.SequenceItem.Imaging.TakeExposure, NINA.Sequencer":
+                obj["ExposureTime"] = exp_time
+            else:
+                for value in obj.values():
+                    update_exposure_time(value, exp_time)
+        elif isinstance(obj, list):
+            for item in obj:
+                update_exposure_time(item, exp_time)
+
+    def update_end_time_condition(obj, hours, minutes):
+        """Find and update TimeCondition in SequentialContainer for end time"""
+        if isinstance(obj, dict):
+            if (obj.get("$type") == "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer" and 
+                obj.get("Name") == "Target Imaging Instructions"):
+                conditions = obj.get("Conditions", {})
+                values = conditions.get("$values", [])
+                
+                for condition in values:
+                    if condition.get("$type") == "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer":
+                        condition["Hours"] = hours
+                        condition["Minutes"] = minutes
+                        logger.debug(f"Set end time condition: {hours:02d}:{minutes:02d}")
+            else:
+                for value in obj.values():
+                    update_end_time_condition(value, hours, minutes)
+        elif isinstance(obj, list):
+            for item in obj:
+                update_end_time_condition(item, hours, minutes)
+
+    # Create a deep copy of the night template
+    import copy
+    night_sequence = copy.deepcopy(night_template)
+    
+    # Update sequence name
+    today = date.today()
+    date_str = today.strftime('%Y%m%d')
+    night_sequence["Name"] = date_str
+    
+    # Generate target containers for each target
+    target_containers = []
+    
+    for i, target in enumerate(targets):
+        target_name = target.get('name', 'Unknown')
+        ra_str = target.get('ra', '00:00:00')
+        dec_str = target.get('dec', '+00:00:00')
+        is_last_target = (i == len(targets) - 1)
+        
+        # Parse RA (HH:MM:SS.SS format)
+        ra_parts = ra_str.split(':')
+        ra_hours = int(ra_parts[0]) if len(ra_parts) > 0 else 0
+        ra_minutes = int(ra_parts[1]) if len(ra_parts) > 1 else 0
+        ra_seconds = float(ra_parts[2]) if len(ra_parts) > 2 else 0.0
+        
+        # Parse Dec (±DD:MM:SS.SS format)
+        dec_negative = dec_str.startswith('-')
+        dec_str_abs = dec_str.lstrip('+-')
+        dec_parts = dec_str_abs.split(':')
+        dec_degrees = int(dec_parts[0]) if len(dec_parts) > 0 else 0
+        if dec_negative:
+            dec_degrees = -dec_degrees
+        dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 else 0
+        dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 else 0.0
+        
+        # Calculate exposure time
+        mag_max_str = target.get('mag_max', '12.0')
+        try:
+            mag_max = float(mag_max_str)
+            exposure_time = get_exposure_time(mag_max)
+        except (ValueError, TypeError):
+            exposure_time = 40.0
+            
+        # Create target container from template
+        target_container = copy.deepcopy(target_template)
+        
+        # Update target name
+        target_container["Target"]["TargetName"] = target_name
+        target_container["Name"] = target_name
+        
+        # Update coordinates in all places
+        update_coordinates(target_container, ra_hours, ra_minutes, ra_seconds, 
+                         dec_negative, dec_degrees, dec_minutes, dec_seconds)
+        
+        # Update exposure time
+        update_exposure_time(target_container, exposure_time)
+        
+        # Calculate observation time window
+        minima_datetime = target.get('minima_datetime_local')
+        if minima_datetime:
+            start_time = minima_datetime - timedelta(hours=2)
+            start_hours = start_time.hour
+            start_minutes = start_time.minute
+            
+            if is_last_target:
+                # For the last target, set end time to astronomical dawn
+                obs_date = minima_datetime.date()
+                dawn_time_str = calculate_astronomical_dawn(obs_date, LATITUDE, LONGITUDE)
+                dawn_parts = dawn_time_str.split(':')
+                end_hours = int(dawn_parts[0])
+                end_minutes = int(dawn_parts[1])
+            else:
+                end_time = minima_datetime + timedelta(hours=2)
+                end_hours = end_time.hour
+                end_minutes = end_time.minute
+        else:
+            # Default to 20:00 if no time available
+            start_hours = 20
+            start_minutes = 0
+            end_hours = 0 if not is_last_target else 6
+            end_minutes = 0
+        
+        # Update end time condition
+        update_end_time_condition(target_container, end_hours, end_minutes)
+        
+        # Update pushover message for last target
+        if is_last_target:
+            def update_pushover_message(obj, new_message):
+                if isinstance(obj, dict):
+                    if (obj.get("$type") == "DaleGhent.NINA.GroundStation.SendToPushover.SendToPushover, DaleGhent.NINA.GroundStation" and
+                        obj.get("Title") == "$$TARGET_NAME$$ done"):
+                        obj["Message"] = new_message
+                    else:
+                        for value in obj.values():
+                            update_pushover_message(value, new_message)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        update_pushover_message(item, new_message)
+            
+            update_pushover_message(target_container, "done for the night")
+        
+        target_containers.append(target_container)
+    
+    # Insert target containers into the night sequence
+    # Find the Target Area Container
+    for item in night_sequence["Items"]["$values"]:
+        if item.get("$type") == "NINA.Sequencer.Container.TargetAreaContainer, NINA.Sequencer":
+            item["Items"]["$values"] = target_containers
+            break
+    
+    # Normalize all IDs to ensure uniqueness
+    night_sequence = _normalize_nina_ids(night_sequence)
+    
+    # Save to file
+    filename = f"{date_str}_night_sequence.json"
+    filepath = output_dir / filename
+    
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(night_sequence, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Created NINA night sequence file: {filepath}")
+        return filepath
+    except Exception as e:
+        logger.error(f"Failed to save night sequence file: {e}")
+        return None
 
 
 def check_already_observed(targets: List[Dict], observation_date: date, db_path: Path) -> tuple[List[str], List[str]]:
