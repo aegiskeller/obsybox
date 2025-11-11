@@ -176,4 +176,36 @@ You can also remove the task directly with schtasks if you prefer:
 
     schtasks /Delete /TN "Obsybox_GetSystemStats" /F
 
+Schedule loop-wrapper at startup (recommended)
+---------------------------------------------
+
+If you prefer a single long-running process that wakes every 60s (avoids GUI 5-min minimum and overlapping runs), schedule the bundled PowerShell wrapper at system startup. Run an elevated PowerShell and execute the following (this reliably passes arguments to PowerShell):
+
+```powershell
+$script = 'C:\Users\Admin\Documents\Arduino\obsybox\systemMonitoring\ComputeMonitoring\run_get_system_stats_loop.ps1'
+$arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`" -IntervalSeconds 60"
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+Register-ScheduledTask -TaskName 'Obsybox_GetSystemStats_Loop' -Action $action -Trigger $trigger -Settings $settings -User 'SYSTEM' -RunLevel Highest
+```
+
+Notes:
+- Run the above as Administrator. It creates a task that starts at boot and runs the wrapper which itself loops every 60s.
+- To verify the task and tail logs:
+
+```powershell
+Get-ScheduledTask -TaskName 'Obsybox_GetSystemStats_Loop' | Format-List *
+Get-ScheduledTaskInfo -TaskName 'Obsybox_GetSystemStats_Loop' | Format-List *
+Get-Content C:\Logs\obsybox\get_system_stats.log -Tail 200 -Wait
+```
+
+To remove the task:
+
+```powershell
+Unregister-ScheduledTask -TaskName 'Obsybox_GetSystemStats_Loop' -Confirm:$false
+# or
+schtasks /Delete /TN "Obsybox_GetSystemStats_Loop" /F
+```
+
 

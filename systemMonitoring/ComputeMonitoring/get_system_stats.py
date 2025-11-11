@@ -9,12 +9,16 @@ Fallbacks:
 - Try psutil.sensors_temperatures(), then LHM (http://localhost:8085/data.json) for CPU temp.
 - Use `netsh wlan show interfaces` for Wi-Fi signal percent and estimate dBm.
 - Publish with paho.mqtt if available, otherwise try mosquitto_pub; if neither, print JSON to stdout.
+
+Runs in continuous loop, publishing every 60 seconds.
 """
 import json
 import socket
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 def get_cpu_load():
@@ -164,41 +168,30 @@ def publish_json(payload_json: str):
     try:
         import paho.mqtt.publish as publish
         publish.single('obsybox/system_monitoring', payload_json, hostname='192.168.1.49', qos=1)
-        print('published')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'[{timestamp}] Published to MQTT')
         return 0
-    except Exception:
-        pass
+    except Exception as e:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'[{timestamp}] paho.mqtt failed: {e}')
 
     # Try mosquitto_pub
     try:
         subprocess.run(['mosquitto_pub', '-h', '192.168.1.49', '-t', 'obsybox/system_monitoring', '-m', payload_json], check=True)
-        print('published')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'[{timestamp}] Published via mosquitto_pub')
         return 0
-    except Exception:
-        pass
+    except Exception as e:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'[{timestamp}] mosquitto_pub failed: {e}')
 
     # Fallback: print to stdout
-    print(payload_json)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f'[{timestamp}] MQTT unavailable, payload: {payload_json}')
     return 2
 
-def main(argv):
-    # Auto-detect drive based on hostname, with command line override
-    hostname = socket.gethostname().lower()
-    
-    # Define drive mappings per hostname
-    drive_mappings = {
-        'piglet': 'C:',
-        # Add other hostnames here as needed
-        # 'othermachine': 'D:',
-    }
-    
-    # Default to D: for unmapped machines
-    drive = drive_mappings.get(hostname, 'D:')
-    
-    # Command line argument overrides auto-detection
-    if len(argv) >= 2:
-        drive = argv[1]
-
+def collect_and_publish(drive):
+    """Collect system stats and publish to MQTT."""
     cpu_temp = get_cpu_temp()
     cpu_load = get_cpu_load()
     disk_free_gb = get_disk_free_gb(drive)
@@ -219,6 +212,39 @@ def main(argv):
     payload = json.dumps(filtered, separators=(',', ':'))
     return publish_json(payload)
 
+def main(argv):
+    # Auto-detect drive based on hostname, with command line override
+    hostname = socket.gethostname().lower()
+    
+    # Define drive mappings per hostname
+    drive_mappings = {
+        'piglet': 'C:',
+        # Add other hostnames here as needed
+        # 'othermachine': 'D:',
+    }
+    
+    # Default to D: for unmapped machines
+    drive = drive_mappings.get(hostname, 'D:')
+    
+    # Command line argument overrides auto-detection
+    if len(argv) >= 2:
+        drive = argv[1]
+
+    print(f'Starting system monitoring loop for {hostname} (monitoring drive {drive})')
+    print('Publishing to obsybox/system_monitoring every 60 seconds')
+    print('Press Ctrl+C to stop\n')
+
+    while True:
+        try:
+            collect_and_publish(drive)
+            time.sleep(60)
+        except KeyboardInterrupt:
+            print('\nStopping system monitoring...')
+            sys.exit(0)
+        except Exception as e:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f'[{timestamp}] Error: {e}')
+            time.sleep(60)  # Continue despite errors
+
 if __name__ == '__main__':
-    rc = main(sys.argv)
-    sys.exit(rc)
+    main(sys.argv)
