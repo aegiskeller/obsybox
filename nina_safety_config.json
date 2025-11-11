@@ -1,0 +1,35 @@
+{
+  "nina_log_paths": [
+    "C:\\Users\\aegis\\AppData\\Local\\NINA\\Logs",
+    "C:\\ProgramData\\NINA\\Logs",
+    "C:\\Users\\aegis\\Documents\\NINA\\Logs"
+  ],
+  "safety_timeouts": {
+    "tracking_stop_minutes": 51,
+    "dawn_shutdown_minutes": 15,
+    "emergency_shutdown_minutes": 15
+  },
+  "check_interval_seconds": 60,
+  "emergency_shutdown_script": "C:\\Users\\aegis\\Documents\\obsybox\\nina_watchdog\\emergency_shutdown.py",
+  "ascom_telescope_driver": "ASCOM.RRCIDriver.Telescope",
+  "ascom_dome_driver": "RRCI.Dome",
+  "nina_process_name": "NINA.exe",
+  "safety_checks": {
+    "monitor_nina_process": true,
+    "monitor_log_activity": true,
+    "check_weather_safety": true,
+    "check_sun_altitude": true
+  },
+  "mqtt_broker": "192.168.1.49",
+  "mqtt_port": 1883,
+  "mqtt_safety_topic": "obsybox/safety_monitor",
+  "notification_email": null,
+  "pushover": {
+    "enabled": false,
+    "app_token": "YOUR_PUSHOVER_APP_TOKEN_HERE",
+    "user_key": "YOUR_PUSHOVER_USER_KEY_HERE",
+    "emergency_priority": 2,
+    "critical_priority": 1,
+    "normal_priority": 0
+  }
+}

@@ -144,4 +144,8 @@ def update_config_from_gui_values(gui_values):
     if 'allow_g_targets' in gui_values:
         config['target_constraints']['allow_g_targets'] = gui_values['allow_g_targets']
     
+    # Update export settings
+    if 'nina_export_base_dir' in gui_values:
+        config['export_settings']['nina_export_base_dir'] = gui_values['nina_export_base_dir']
+    
     return save_config(config)

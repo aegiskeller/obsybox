@@ -16,16 +16,16 @@ Fill in these exact values:
 | Field | Value |
 |-------|-------|
 | **Name** | `NINA Watchdog Safety Monitor` |
-| **Executable** | `C:\Users\aegis\Documents\obsybox\nina_watchdog\nina_watchdog_script.bat` |
+| **Executable** | `C:\Users\aegis\Documents\obsybox\nina_watchdog\nina_watchdog_visible.bat` |
 | **Arguments** | *(leave blank)* |
 | **Working Directory** | *(leave blank)* |
-| **Description** | `Observatory safety monitoring with emergency shutdown` |
+| **Description** | `Observatory safety monitoring with visible GUI` |
 
 ### Step 3: Test the Integration
 1. Click **"Test"** or **"Run"** in NINA's external scripts dialog
 2. You should see a command window briefly showing startup progress
-3. The Safety Monitor GUI will launch and minimize to system tray
-4. Look for the safety monitor icon in your system tray
+3. The Safety Monitor GUI will launch and **remain visible** on screen
+4. You'll see the full watchdog interface with status indicators
 5. Monitoring begins automatically within 1 second
 
 ## 🎯 NINA Usage Workflow
@@ -63,6 +63,19 @@ Fill in these exact values:
 - **Red**: Critical issues, emergency shutdown triggered
 
 ## 🔧 Advanced Integration
+
+### GUI Version Options
+Choose between two launcher versions based on your preference:
+
+1. **Visible GUI Mode** (Current setup):
+   - **Script**: `nina_watchdog_visible.bat`
+   - **Behavior**: Shows full GUI window immediately
+   - **Best for**: When you want to monitor status visually
+
+2. **Hidden/System Tray Mode** (Alternative):
+   - **Script**: `nina_watchdog_script.bat` 
+   - **Behavior**: Starts minimized to system tray
+   - **Best for**: Non-intrusive background monitoring
 
 ### Multiple NINA Profiles
 Create separate external scripts for different observing setups:
@@ -129,7 +142,7 @@ Add the safety monitor to NINA sequences:
 
 ### Script Won't Launch
 **Check these:**
-- Path is correct: `C:\Users\aegis\Documents\obsybox\nina_safetymon\nina_external_script.bat`
+- Path is correct: `C:\Users\aegis\Documents\obsybox\nina_watchdog\nina_watchdog_visible.bat`
 - Virtual environment exists: `venv\Scripts\python.exe`
 - No permission issues (run NINA as administrator if needed)
 

@@ -1588,6 +1588,9 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         today = date.today()
         date_str = today.strftime('%Y%m%d')  # Format: 20251102
         output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+    else:
+        # Convert string to Path object if needed
+        output_dir = Path(output_dir)
         
     # Always ensure the output directory exists (whether default or custom)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1956,7 +1959,7 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         # Create date-based directory structure using configurable base path
         today = date.today()
         date_str = today.strftime('%Y%m%d')  # Format: 20251102
-        output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+        output_dir = Path(NINA_EXPORT_BASE_DIR).parent / "Sequences" / date_str
         
     # Always ensure the output directory exists (whether default or custom)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1965,16 +1968,23 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
     if template_file is None:
         template_file = NINA_TEMPLATE_FILE
     if night_template_file is None:
-        night_template_file = "night_sequence.template.json"
+        night_template_file = "night_sequence_complex.json"
     
-    # Load individual target template
-    target_template_path = Path(__file__).parent / template_file
+    # Load individual target template - handle both relative and absolute paths
+    if Path(template_file).is_absolute():
+        target_template_path = Path(template_file)
+    else:
+        target_template_path = Path(__file__).parent / template_file
+    
     if not target_template_path.exists():
         logger.error(f"Target template file not found: {target_template_path}")
         return None
-    
-    # Load night sequence template
-    night_template_path = Path(__file__).parent / night_template_file
+
+    # Load night sequence template - handle both relative and absolute paths  
+    if Path(night_template_file).is_absolute():
+        night_template_path = Path(night_template_file)
+    else:
+        night_template_path = Path(__file__).parent / night_template_file
     if not night_template_path.exists():
         logger.error(f"Night template file not found: {night_template_path}")
         return None
@@ -2195,12 +2205,50 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         
         target_containers.append(target_container)
     
+    # Fix Parent references for all target containers
+    def fix_parent_references(containers, parent_ref="1"):
+        """Fix Parent references to point to the sequence root"""
+        for container in containers:
+            # Set the target container's parent to the sequence root
+            container["Parent"] = {"$ref": parent_ref}
+            
+            # Recursively fix all child Parent references
+            def fix_child_parents(obj, container_id):
+                if isinstance(obj, dict):
+                    if "Parent" in obj and obj.get("$id") != container_id:
+                        # If this object has a Parent and it's not the container itself
+                        # Point it to the container
+                        obj["Parent"] = {"$ref": container_id}
+                    for value in obj.values():
+                        if isinstance(value, (dict, list)):
+                            fix_child_parents(value, container_id)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        if isinstance(item, (dict, list)):
+                            fix_child_parents(item, container_id)
+            
+            # Fix all children to point to this container
+            if container.get("$id"):
+                fix_child_parents(container, container["$id"])
+    
+    fix_parent_references(target_containers)
+    
     # Insert target containers into the night sequence
-    # Find the Target Area Container
+    # Find the TargetAreaContainer and insert targets there
+    target_area_found = False
     for item in night_sequence["Items"]["$values"]:
         if item.get("$type") == "NINA.Sequencer.Container.TargetAreaContainer, NINA.Sequencer":
+            # Found the target area container - replace its items with our targets
             item["Items"]["$values"] = target_containers
+            target_area_found = True
+            logger.info(f"Added {len(target_containers)} targets to TargetAreaContainer")
             break
+    
+    # If no TargetAreaContainer found, this is a problem with the template
+    if not target_area_found:
+        logger.error("No TargetAreaContainer found in night sequence template!")
+        logger.error("Night sequence template must contain Start, Target, and End area containers")
+        return None
     
     # Normalize all IDs to ensure uniqueness
     night_sequence = _normalize_nina_ids(night_sequence)
