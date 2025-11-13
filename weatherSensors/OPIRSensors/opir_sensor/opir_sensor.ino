@@ -447,8 +447,6 @@ void loop() {
     Serial.print("Lux: "); Serial.println(lux, 2);
     Serial.print("Sky Temp: "); Serial.print(objTemp, 2); Serial.println(" °C");
     Serial.print("Ambient Temp: "); Serial.print(ambTemp, 2); Serial.println(" °C");
-    Serial.print("IR: "); Serial.println(ir);
-    Serial.print("Full: "); Serial.println(full);
     Serial.print("AHT10 Temp: "); Serial.print(ahtTemp, 2); Serial.println(" °C");
     Serial.print("AHT10 Humidity: "); Serial.print(ahtHum, 2); Serial.println(" %");
     
