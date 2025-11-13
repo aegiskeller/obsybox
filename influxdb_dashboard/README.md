@@ -2,16 +2,6 @@
 
 A lightweight, login-free web dashboard for visualizing obsybox sensor data stored in InfluxDB. Alternative to Grafana without authentication requirements.
 
-## Features
-
-- 🚫 **No Login Required** - Direct access to your data
-- 📊 **Interactive Charts** - Powered by Plotly.js for smooth, interactive visualizations
-- 📱 **Responsive Design** - Works on desktop, tablet, and mobile
-- 🔄 **Auto-Refresh** - Optional 30-second automatic data updates
-- 📈 **Multiple Time Ranges** - View data from 1 hour to 30 days
-- 🎯 **Multi-Database Support** - Browse all InfluxDB databases and measurements
-- 📉 **Real-time Stats** - Latest values displayed as stat cards
-- 🌐 **Network Accessible** - Access from any device on your network
 
 ## Quick Start
 

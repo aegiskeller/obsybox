@@ -555,8 +555,247 @@
             
             chartsGrid.innerHTML = '';
             
+            // Field categories
+            const tempFields = ['temperature', 'temp', 'ambtemp', 'ambient', 'sky', 'skytemp', 'aht10_temp'];
+            const humidityFields = ['humidity', 'hum', 'aht10_hum'];
+            const rainFields = ['rain', 'rainsensor'];
+            
+            // Collect data by category
+            let tempTracesData = {};
+            let humidityTracesData = {};
+            let rainData = null;
+            let hasTemperatureData = false;
+            let hasHumidityData = false;
+            
             allCharts.forEach(({measurement, data, fields}) => {
-                const numericFields = fields.filter(f => f.type === 'float' || f.type === 'integer');
+                fields.forEach(field => {
+                    const fieldName = field.name.toLowerCase();
+                    const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
+                    if (fieldData.length === 0) return;
+                    
+                    // Temperature fields
+                    if (tempFields.some(tf => fieldName.includes(tf))) {
+                        hasTemperatureData = true;
+                        const traceName = formatFieldName(field.name);
+                        if (!tempTracesData[traceName]) {
+                            tempTracesData[traceName] = { x: [], y: [] };
+                        }
+                        fieldData.forEach(d => {
+                            tempTracesData[traceName].x.push(d.time);
+                            tempTracesData[traceName].y.push(d[field.name]);
+                        });
+                    }
+                    // Humidity fields
+                    else if (humidityFields.some(hf => fieldName.includes(hf))) {
+                        hasHumidityData = true;
+                        const traceName = 'AHT10';  // Use AHT10 as legend name
+                        if (!humidityTracesData[traceName]) {
+                            humidityTracesData[traceName] = { x: [], y: [] };
+                        }
+                        fieldData.forEach(d => {
+                            humidityTracesData[traceName].x.push(d.time);
+                            humidityTracesData[traceName].y.push(d[field.name]);
+                        });
+                    }
+                    // Rain sensor
+                    else if (rainFields.some(rf => fieldName.includes(rf))) {
+                        rainData = {
+                            x: fieldData.map(d => d.time),
+                            y: fieldData.map(d => d[field.name]),
+                            measurement: measurement,
+                            fieldName: field.name
+                        };
+                    }
+                });
+            });
+            
+            // 1. Rain Sensor Chart (Top position)
+            if (rainData) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = 'env-chart-rain-sensor';
+                chartsGrid.appendChild(chartDiv);
+                
+                const yValues = rainData.y;
+                const minY = Math.min(...yValues);
+                const maxY = Math.max(...yValues);
+                
+                const trace = {
+                    x: rainData.x,
+                    y: rainData.y,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Rain Sensor',
+                    line: { width: 2 },
+                    marker: { size: 4 }
+                };
+                
+                const layout = {
+                    title: {
+                        text: 'Rain Sensor',
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: { title: 'Time', type: 'date' },
+                    yaxis: { 
+                        title: 'ADU (8-bit)',
+                        range: [minY, maxY]  // Keep to min/max
+                    },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF',
+                    shapes: [
+                        {
+                            // Green zone (no rain): below 450
+                            type: 'rect',
+                            xref: 'paper',
+                            yref: 'y',
+                            x0: 0,
+                            x1: 1,
+                            y0: minY,
+                            y1: 450,
+                            fillcolor: 'rgba(0, 255, 0, 0.2)',  // Green
+                            line: { width: 0 }
+                        },
+                        {
+                            // Red zone (rain): above 999
+                            type: 'rect',
+                            xref: 'paper',
+                            yref: 'y',
+                            x0: 0,
+                            x1: 1,
+                            y0: 999,
+                            y1: maxY,
+                            fillcolor: 'rgba(255, 0, 0, 0.2)',  // Red
+                            line: { width: 0 }
+                        }
+                    ]
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, [trace], layout, config);
+            }
+            
+            // 2. Temperature Chart
+            if (hasTemperatureData) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = 'env-chart-temperatures-combined';
+                chartsGrid.appendChild(chartDiv);
+                
+                // Find minimum sky temperature for y-axis range
+                let minSkyTemp = 0;
+                for (const [traceName, traceData] of Object.entries(tempTracesData)) {
+                    if (traceName.toLowerCase().includes('sky')) {
+                        const skyMin = Math.min(...traceData.y);
+                        minSkyTemp = Math.min(minSkyTemp, skyMin);
+                    }
+                }
+                
+                // Create traces
+                const traces = [];
+                for (const [traceName, traceData] of Object.entries(tempTracesData)) {
+                    traces.push({
+                        x: traceData.x,
+                        y: traceData.y,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: traceName,
+                        line: { width: 2 },
+                        marker: { size: 4 }
+                    });
+                }
+                
+                const layout = {
+                    title: {
+                        text: 'Temperatures',
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: { title: 'Time', type: 'date' },
+                    yaxis: { title: '°C' },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF',
+                    shapes: [{
+                        type: 'rect',
+                        xref: 'paper',
+                        yref: 'y',
+                        x0: 0,
+                        x1: 1,
+                        y0: minSkyTemp,  // Use current min sky temp instead of -100
+                        y1: -5,          // End at -5°C
+                        fillcolor: 'rgba(0, 255, 0, 0.2)',  // Green with transparency
+                        line: { width: 0 }
+                    }]
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, traces, layout, config);
+            }
+            
+            // 3. Humidity Chart
+            if (hasHumidityData) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = 'env-chart-humidity-combined';
+                chartsGrid.appendChild(chartDiv);
+                
+                // Create traces
+                const traces = [];
+                for (const [traceName, traceData] of Object.entries(humidityTracesData)) {
+                    traces.push({
+                        x: traceData.x,
+                        y: traceData.y,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: traceName,  // Will show "AHT10" in legend
+                        line: { width: 2 },
+                        marker: { size: 4 }
+                    });
+                }
+                
+                const layout = {
+                    title: {
+                        text: 'Humidity',
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: { title: 'Time', type: 'date' },
+                    yaxis: { title: '%' },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF'
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, traces, layout, config);
+            }
+            
+            // 4. Display other remaining fields
+            allCharts.forEach(({measurement, data, fields}) => {
+                const numericFields = fields.filter(f => {
+                    const fieldName = f.name.toLowerCase();
+                    const isTemp = tempFields.some(tf => fieldName.includes(tf));
+                    const isHumidity = humidityFields.some(hf => fieldName.includes(hf));
+                    const isRain = rainFields.some(rf => fieldName.includes(rf));
+                    return (f.type === 'float' || f.type === 'integer') && !isTemp && !isHumidity && !isRain;
+                });
                 
                 numericFields.forEach(field => {
                     const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
@@ -601,7 +840,7 @@
             });
         }
         
-        // Display computing charts
+        // Display computing charts with color by hostname
         function displayComputingCharts(allCharts) {
             const chartsGrid = document.getElementById('comp-chartsGrid');
             
@@ -612,10 +851,42 @@
             
             chartsGrid.innerHTML = '';
             
-            allCharts.forEach(({measurement, data, fields}) => {
+            // Color palette for different hostnames
+            const colorPalette = [
+                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+            ];
+            
+            // Custom unit mapping for computing resources
+            function getComputingUnit(fieldName, fieldIndex) {
+                const name = fieldName.toLowerCase();
+                
+                // Percentage fields (first two plots)
+                if (name.includes('percent') || name.includes('usage') || name.includes('cpu') && !name.includes('temp')) {
+                    return '%';
+                }
+                // Memory/Disk in GB (third plot)
+                if (name.includes('memory') || name.includes('disk') || name.includes('ram')) {
+                    if (name.includes('used') || name.includes('free') || name.includes('total') || name.includes('available')) {
+                        return 'GB';
+                    }
+                }
+                // WiFi signal strength (last plot)
+                if (name.includes('wifi') || name.includes('signal') || name.includes('rssi')) {
+                    return 'dBm';
+                }
+                // Temperature
+                if (name.includes('temp')) {
+                    return '°C';
+                }
+                
+                return getUnit(fieldName);
+            }
+            
+            allCharts.forEach(({measurement, data, fields}, chartIndex) => {
                 const numericFields = fields.filter(f => f.type === 'float' || f.type === 'integer');
                 
-                numericFields.forEach(field => {
+                numericFields.forEach((field, fieldIndex) => {
                     const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
                     if (fieldData.length === 0) return;
                     
@@ -624,15 +895,34 @@
                     chartDiv.id = `comp-chart-${measurement}-${field.name}`;
                     chartsGrid.appendChild(chartDiv);
                     
-                    const trace = {
-                        x: fieldData.map(d => d.time),
-                        y: fieldData.map(d => d[field.name]),
-                        type: 'scatter',
-                        mode: 'lines+markers',
-                        name: formatFieldName(field.name),
-                        line: { width: 2 },
-                        marker: { size: 4 }
-                    };
+                    // Group data by hostname
+                    const dataByHostname = {};
+                    fieldData.forEach(d => {
+                        const hostname = d.hostname || d.host || 'unknown';
+                        if (!dataByHostname[hostname]) {
+                            dataByHostname[hostname] = [];
+                        }
+                        dataByHostname[hostname].push(d);
+                    });
+                    
+                    // Create a trace for each hostname
+                    const traces = [];
+                    const hostnames = Object.keys(dataByHostname).sort();
+                    
+                    hostnames.forEach((hostname, index) => {
+                        const hostnameData = dataByHostname[hostname];
+                        const color = colorPalette[index % colorPalette.length];
+                        
+                        traces.push({
+                            x: hostnameData.map(d => d.time),
+                            y: hostnameData.map(d => d[field.name]),
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: hostname,
+                            line: { width: 2, color: color },
+                            marker: { size: 4, color: color }
+                        });
+                    });
                     
                     const layout = {
                         title: {
@@ -640,11 +930,19 @@
                             font: { size: 16, color: '#333' }
                         },
                         xaxis: { title: 'Time', type: 'date' },
-                        yaxis: { title: getUnit(field.name) },
-                        margin: { t: 40, r: 20, b: 40, l: 60 },
-                        height: 300,
+                        yaxis: { title: getComputingUnit(field.name, fieldIndex) },
+                        margin: { t: 40, r: 20, b: 100, l: 60 },  // Increased bottom margin for legend
+                        height: 350,  // Increased height to accommodate legend
                         plot_bgcolor: '#E6F3FF',
-                        paper_bgcolor: '#FFFFFF'
+                        paper_bgcolor: '#FFFFFF',
+                        showlegend: true,
+                        legend: {
+                            orientation: 'h',
+                            yanchor: 'top',
+                            y: -0.25,  // Position legend below x-axis
+                            xanchor: 'center',
+                            x: 0.5
+                        }
                     };
                     
                     const config = {
@@ -653,7 +951,7 @@
                         displaylogo: false
                     };
                     
-                    Plotly.newPlot(chartDiv, [trace], layout, config);
+                    Plotly.newPlot(chartDiv, traces, layout, config);
                 });
             });
         }

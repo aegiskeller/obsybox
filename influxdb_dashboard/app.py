@@ -61,7 +61,7 @@ def query_data(measurement, time_range='1h', field=None, database=None):
         database: Database name (if None, uses default)
     
     Returns:
-        List of data points with timestamps and values
+        List of data points with timestamps and values (including tags)
     """
     try:
         # Use specified database or default
@@ -74,7 +74,20 @@ def query_data(measurement, time_range='1h', field=None, database=None):
             query = f'SELECT * FROM "{measurement}" WHERE time > now() - {time_range}'
         
         result = temp_client.query(query)
-        points = list(result.get_points())
+        
+        # Get points with tags included
+        points = []
+        for series in result.raw.get('series', []):
+            tags = series.get('tags', {})
+            columns = series.get('columns', [])
+            values = series.get('values', [])
+            
+            for value_row in values:
+                point = dict(zip(columns, value_row))
+                # Add tags to each point
+                point.update(tags)
+                points.append(point)
+        
         return points
     except Exception as e:
         print(f"Error querying data: {e}")
