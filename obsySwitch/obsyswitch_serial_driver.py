@@ -185,7 +185,7 @@ class ObsySwitchSerialController:
         """
         if not self._validate_switch_id(switch_id):
             return ""
-        
+       
         if self.device_status:
             # Find relay by converting 0-based switch_id to 1-based relay_id
             relay_id = switch_id + 1
@@ -248,7 +248,7 @@ class ObsySwitchSerialController:
         try:
             relay_num = switch_id + 1  # Convert to 1-based
             state_str = "ON" if state else "OFF"
-            
+           
             success, response = self._send_command(f"SET_RELAY,{relay_num},{state_str}")
             
             if success and response.startswith("OK,"):
@@ -410,7 +410,7 @@ class ObsySwitchSerialController:
         """
         if not self.serial_connection or not self.serial_connection.is_open:
             return False, "Not connected"
-        
+       
         try:
             # Clear input buffer
             self.serial_connection.reset_input_buffer()
@@ -441,7 +441,7 @@ class ObsySwitchSerialController:
             
             # Timeout
             return False, f"Timeout waiting for response to: {command}"
-            
+           
         except Exception as e:
             return False, f"Communication error: {str(e)}"
     
@@ -541,65 +541,65 @@ def test_serial_relay_controller():
         # Connect
         print("Connecting to Arduino...")
         if not controller.connect():
-            print("❌ Failed to connect to Arduino")
+            print(f"Failed to connect to Arduino")
             print("Check:")
-            print("  - Arduino is connected via USB")
-            print("  - Correct USB drivers installed")
-            print("  - RelayController_Serial sketch uploaded")
-            print("  - No other programs using the serial port")
+            print(f" - Arduino is connected via USB")
+            print(f" - Correct USB drivers installed")
+            print(f" - RelayController_Serial sketch uploaded")
+            print(f" - No other programs using the serial port")
             return False
         
-        print("✅ Connected successfully!")
+        print(f"Connected successfully!")
         
         # Get device info
         device_info = controller.get_device_info()
         if device_info:
-            print(f"📱 Device: {device_info.device_name}")
-            print(f"💾 Firmware: {device_info.firmware}")
-            print(f"⏱️  Uptime: {device_info.uptime / 1000:.1f} seconds")
-            print(f"🧠 Free RAM: {device_info.free_memory} bytes")
+            print(f"Device: {device_info.device_name}")
+            print(f"Firmware: {device_info.firmware}")
+            print(f"Uptime: {device_info.uptime / 1000:.1f} seconds")
+            print(f"Free RAM: {device_info.free_memory} bytes")
         
         # Show switch status
-        print(f"\n🔌 Available switches: {controller.get_max_switch() + 1}")
+        print(f"\nAvailable switches: {controller.get_max_switch() + 1}")
         all_switches = controller.get_all_switches()
         for switch_id, state in all_switches.items():
             switch_name = controller.get_switch_name(switch_id)
-            print(f"  Switch {switch_id} ({switch_name}): {'ON' if state else 'OFF'}")
+            print(f"Switch {switch_id} ({switch_name}): {'ON' if state else 'OFF'}")
         
         # Test switch control
-        print(f"\n🧪 Testing switch control...")
+        print(f"\nTesting switch control...")
         
         # Test switch 0 (Mount)
         print("Testing Mount relay (Switch 0)...")
         original_state = controller.get_switch(0)
-        print(f"  Original state: {'ON' if original_state else 'OFF'}")
+        print(f"Original state: {'ON' if original_state else 'OFF'}")
         
         # Toggle it
-        print("  Toggling...")
+        print(f"Toggling...")
         controller.toggle_switch(0)
         time.sleep(1)
         
         new_state = controller.get_switch(0)
-        print(f"  New state: {'ON' if new_state else 'OFF'}")
+        print(f"New state: {'ON' if new_state else 'OFF'}")
         
         # Toggle back
-        print("  Toggling back...")
+        print(f"Toggling back...")
         controller.toggle_switch(0)
         time.sleep(1)
         
         final_state = controller.get_switch(0)
-        print(f"  Final state: {'ON' if final_state else 'OFF'}")
+        print(f"Final state: {'ON' if final_state else 'OFF'}")
         
         if final_state == original_state:
-            print("  ✅ Switch control test passed!")
+            print(f"  Switch control test passed!")
         else:
-            print("  ⚠️  Switch state mismatch")
+            print(f"   Switch state mismatch")
         
-        print(f"\n🎉 All tests completed successfully!")
+        print(f"\nAll tests completed successfully!")
         return True
         
     except Exception as e:
-        print(f"❌ Test failed: {str(e)}")
+        print(f"Test failed: {str(e)}")
         return False
         
     finally:

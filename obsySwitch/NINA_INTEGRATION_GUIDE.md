@@ -1,4 +1,4 @@
-# NINA → ASCOM → Arduino Relay Control Integration Guide
+# NINA  ASCOM  Arduino Relay Control Integration Guide
 
 Complete pathway documentation for controlling Arduino relay switches from NINA scheduling software through ASCOM drivers.
 
@@ -8,7 +8,7 @@ This integration enables NINA (Nighttime Imaging 'N' Astronomy) to control your 
 
 **Architecture Flow:**
 ```
-NINA Sequence → ASCOM Switch Driver → USB Serial → Arduino Uno → 4-Channel Relay Module → Equipment
+NINA Sequence  ASCOM Switch Driver  USB Serial  Arduino Uno  4-Channel Relay Module  Equipment
 ```
 
 ## Hardware Requirements
@@ -21,24 +21,24 @@ NINA Sequence → ASCOM Switch Driver → USB Serial → Arduino Uno → 4-Chann
 
 ### Relay Connections
 ```
-Arduino Pin → Relay Module
-Pin 2       → IN1 (Relay 1 - Mount)
-Pin 3       → IN2 (Relay 2 - Camera)
-Pin 4       → IN3 (Relay 3 - Dew Heater)
-Pin 5       → IN4 (Relay 4 - Focuser)
-5V          → VCC
-GND         → GND
+Arduino Pin  Relay Module
+Pin 2        IN1 (Relay 1 - Mount)
+Pin 3        IN2 (Relay 2 - Camera)
+Pin 4        IN3 (Relay 3 - Dew Heater)
+Pin 5        IN4 (Relay 4 - Focuser)
+5V           VCC
+GND          GND
 ```
 
 ### Power Connections (High Voltage - BE CAREFUL!)
 ```
-Relay 1 NO/COM → Mount Power Supply (120V/240V)
-Relay 2 NO/COM → Camera Power Supply
-Relay 3 NO/COM → Dew Heater Controller
-Relay 4 NO/COM → Focuser Power Supply
+Relay 1 NO/COM  Mount Power Supply (120V/240V)
+Relay 2 NO/COM  Camera Power Supply
+Relay 3 NO/COM  Dew Heater Controller
+Relay 4 NO/COM  Focuser Power Supply
 ```
 
-⚠️  **SAFETY WARNING:** Relay outputs handle mains voltage. Only qualified personnel should wire high voltage connections. Use proper enclosures and safety practices.
+  **SAFETY WARNING:** Relay outputs handle mains voltage. Only qualified personnel should wire high voltage connections. Use proper enclosures and safety practices.
 
 ## Software Installation
 
@@ -112,16 +112,16 @@ The Arduino sketch defines these switch mappings:
 
 In NINA, add "Switch" instructions to your sequences:
 
-1. **Sequence Start** → Add "Switch" instruction
+1. **Sequence Start**  Add "Switch" instruction
    - Device: "ObsyBox Relay Switch - Serial"
-   - Switch: "Mount" (Index 0)
+  - Switch: "Mount" (Index 0)
    - Action: "Turn On"
 
-2. **Imaging Block** → Add switch controls
+2. **Imaging Block**  Add switch controls
    - Before imaging: Turn on Camera, Focuser
    - After imaging: Turn off unnecessary equipment
 
-3. **Sequence End** → Emergency shutdown
+3. **Sequence End**  Emergency shutdown
    - Turn off all switches for safety
 
 #### Method 2: Python Integration Script
@@ -136,13 +136,13 @@ import logging
 
 def startup_sequence():
     """Power on equipment in proper order"""
-    controller = ObsySwitchSerialController()
+   controller = ObsySwitchSerialController()
     
     try:
         controller.connect()
         
         # Startup sequence
-        print("🔌 Starting observatory equipment...")
+        print(f"Starting observatory equipment...")
         
         controller.set_switch(0, True)   # Mount first
         time.sleep(2)
@@ -157,31 +157,31 @@ def startup_sequence():
         if check_dew_conditions():
             controller.set_switch(2, True)
             
-        print("✅ Startup sequence complete")
+        print(f"Startup sequence complete")
         
     finally:
         controller.disconnect()
 
 def shutdown_sequence():
     """Safely power down all equipment"""
-    controller = ObsySwitchSerialController()
+   controller = ObsySwitchSerialController()
     
     try:
         controller.connect()
         
-        print("🔄 Shutting down observatory...")
+        print(f"Shutting down observatory...")
         
         # Turn off everything
         controller.emergency_stop()
         
-        print("✅ All equipment powered off")
+        print(f"All equipment powered off")
         
     finally:
         controller.disconnect()
 
 def check_dew_conditions():
     """Check if dew heater should be activated"""
-    # Add your dew point logic here
+   # Add your dew point logic here
     # Could integrate with weather monitoring
     return True  # Placeholder
 
@@ -212,15 +212,15 @@ Configure NINA to call Python scripts:
 2. **Sequence Structure:**
 ```
 Sequence Start
-├── External Script: Startup Equipment
-├── Cool Camera
-├── Slew to Target
-├── Auto Focus
-├── Start Imaging
-└── Sequence End
-    ├── Stop Imaging
-    ├── Warm Camera
-    └── External Script: Shutdown Equipment
+ External Script: Startup Equipment
+ Cool Camera
+ Slew to Target
+ Auto Focus
+ Start Imaging
+ Sequence End
+     Stop Imaging
+     Warm Camera
+     External Script: Shutdown Equipment
 ```
 
 ## Testing & Troubleshooting
@@ -238,28 +238,28 @@ Expected output:
 Testing ObsyBox Relay Controller - USB Serial Version
 ============================================================
 Connecting to Arduino...
-✅ Connected successfully!
-📱 Device: ObsyBox Relay Controller v1.0
-💾 Firmware: 1.0.0
-⏱️  Uptime: 45.2 seconds
-🧠 Free RAM: 1547 bytes
+ Connected successfully!
+ Device: ObsyBox Relay Controller v1.0
+ Firmware: 1.0.0
+  Uptime: 45.2 seconds
+ Free RAM: 1547 bytes
 
-🔌 Available switches: 4
+ Available switches: 4
   Switch 0 (Mount): OFF
   Switch 1 (Camera): OFF
   Switch 2 (Dew Heater): OFF
   Switch 3 (Focuser): OFF
 
-🧪 Testing switch control...
+ Testing switch control...
 Testing Mount relay (Switch 0)...
   Original state: OFF
   Toggling...
   New state: ON
   Toggling back...
   Final state: OFF
-  ✅ Switch control test passed!
+   Switch control test passed!
 
-🎉 All tests completed successfully!
+ All tests completed successfully!
 ```
 
 ### 2. Serial Port Detection
@@ -280,7 +280,7 @@ Find your Arduino port:
 ls /dev/cu.usb* /dev/ttyUSB* /dev/ttyACM*
 
 # Windows
-# Check Device Manager → Ports (COM & LPT)
+# Check Device Manager  Ports (COM & LPT)
 ```
 
 ### 3. Common Issues
@@ -382,7 +382,7 @@ Connect to weather monitoring:
 ```python
 def should_activate_dew_heater():
     """Check weather conditions for dew heater"""
-    import requests
+   import requests
     
     # Get current conditions
     weather = requests.get("http://192.168.1.183/humidity").json()
@@ -427,7 +427,7 @@ This relay controller integrates with other ObsyBox components:
 ```python
 def check_weather_safety():
     """Check weather before turning on equipment"""
-    import paho.mqtt.client as mqtt
+   import paho.mqtt.client as mqtt
     
     client = mqtt.Client()
     client.connect("192.168.1.49", 1883)
@@ -441,17 +441,17 @@ def check_weather_safety():
 
 def safe_power_on():
     """Only power on if weather is safe"""
-    if check_weather_safety():
+   if check_weather_safety():
         startup_sequence()
     else:
-        print("⚠️  Weather unsafe - equipment remains off")
+        print(f"Weather unsafe - equipment remains off")
 ```
 
 ### MQTT Integration
 ```python
 def publish_relay_status():
     """Publish relay status to MQTT"""
-    import paho.mqtt.client as mqtt
+   import paho.mqtt.client as mqtt
     import json
     
     controller = ObsySwitchSerialController()
@@ -475,4 +475,4 @@ def publish_relay_status():
 5. **Monitor Operations**: Watch for any communication issues
 6. **Document Settings**: Record your specific configuration
 
-This completes the full NINA → ASCOM → Arduino → Relay pathway! The system provides reliable, automated control of your observatory equipment through NINA's scheduling system.
+This completes the full NINA  ASCOM  Arduino  Relay pathway! The system provides reliable, automated control of your observatory equipment through NINA's scheduling system.

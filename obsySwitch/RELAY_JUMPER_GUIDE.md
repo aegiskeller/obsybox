@@ -1,6 +1,6 @@
 # Relay Board Jumper Configuration Guide
 
-## 🔌 **Common Relay Board Jumpers**
+## **Common Relay Board Jumpers**
 
 Most 4-channel relay boards have several jumper configurations that affect how the relays operate. Here are the most common ones:
 
@@ -11,13 +11,13 @@ Most 4-channel relay boards have several jumper configurations that affect how t
 **Common Configurations**:
 ```
 JD-VCC --- VCC  (Jumper connected)
-│
-└─ 5V Input from Arduino
+
+ 5V Input from Arduino
 
 OR
 
 JD-VCC     VCC  (Jumper removed)
-│          │
+          
 External   Arduino 5V
 5V Supply  (logic only)
 ```
@@ -42,7 +42,7 @@ External   Arduino 5V
 - **Active LOW** (most common): Relay turns ON when signal goes LOW (0V)
 - **Active HIGH**: Relay turns ON when signal goes HIGH (5V)
 
-## 🔍 **Diagnosing Your Board**
+## **Diagnosing Your Board**
 
 Since **Relay 4 isn't clicking** but the others work, let's check the jumpers:
 
@@ -60,13 +60,13 @@ Look for these jumper configurations on your relay board:
 ### **Step 3: Common Relay 4 Issues**
 ```
 Possible Causes:
-✓ Missing jumper cap on Relay 4 channel
-✓ Different trigger level setting
-✓ Power isolation jumper in wrong position
-✓ Physical jumper pins bent/damaged
+ Missing jumper cap on Relay 4 channel
+ Different trigger level setting
+ Power isolation jumper in wrong position
+ Physical jumper pins bent/damaged
 ```
 
-## 🛠 **Troubleshooting Steps**
+## **Troubleshooting Steps**
 
 ### **Option 1: Match Relay 4 to Working Relays**
 1. **Compare jumpers**: Make sure **Relay 4** has identical jumper settings to **Relays 1-3**
@@ -86,23 +86,23 @@ If your board has **VCC/JD-VCC jumpers**:
 
 **Current Setup (likely)**:
 ```
-JD-VCC ═══ VCC  (Jumper connected)
+JD-VCC  VCC  (Jumper connected)
 ```
 
 **Try Isolated Power**:
 ```
 JD-VCC     VCC  (Jumper removed)
-│          │
+          
 External   Arduino 5V
 5V Supply  (signal only)
 ```
 
-## 📋 **Common Relay Board Types**
+## **Common Relay Board Types**
 
 ### **Type 1: Simple Relay Board**
 ```
 Jumpers:
-- VCC selection (JD-VCC ↔ VCC)
+- VCC selection (JD-VCC  VCC)
 - Trigger level per channel (H/L)
 ```
 
@@ -123,7 +123,7 @@ Jumpers:
 - LED indicator enable/disable
 ```
 
-## 🔧 **Quick Diagnostic Commands**
+## **Quick Diagnostic Commands**
 
 ### **Test Individual Relay 4**
 ```bash
@@ -143,10 +143,10 @@ ser.close()
 
 ### **Check Relay 4 LED Indicator**
 When running the above command:
-- ✅ **LED lights up**: Relay module getting signal, physical relay may be faulty
-- ❌ **No LED**: Jumper configuration issue or wiring problem
+-  **LED lights up**: Relay module getting signal, physical relay may be faulty
+-  **No LED**: Jumper configuration issue or wiring problem
 
-## 📸 **What to Look For**
+## **What to Look For**
 
 Take a photo of your relay board and look for:
 
@@ -155,7 +155,7 @@ Take a photo of your relay board and look for:
 3. **Labels** - Text like "JD-VCC", "VCC", "H", "L", "5V", "3.3V"
 4. **Missing caps** - Pins without jumper caps that others have
 
-## 💡 **Most Likely Fix**
+## **Most Likely Fix**
 
 Based on your symptoms (software works, no clicking), **Relay 4** probably has:
 
@@ -163,7 +163,7 @@ Based on your symptoms (software works, no clicking), **Relay 4** probably has:
 2. **Wrong trigger level** setting (H/L jumper in wrong position)
 3. **Power isolation** issue if using JD-VCC jumpers
 
-## 🎯 **Action Plan**
+## **Action Plan**
 
 1. **Photo your relay board** - Document current jumper positions
 2. **Compare Relay 1-3 vs Relay 4** jumper settings
@@ -171,4 +171,4 @@ Based on your symptoms (software works, no clicking), **Relay 4** probably has:
 4. **Test immediately** after each change
 5. **Report results** - What jumper changes made it work
 
-The fact that **3 out of 4 relays work perfectly** means your wiring and code are correct - this is almost certainly a **jumper configuration issue** on **Relay 4's channel**! 🔍
+The fact that **3 out of 4 relays work perfectly** means your wiring and code are correct - this is almost certainly a **jumper configuration issue** on **Relay 4's channel**! 

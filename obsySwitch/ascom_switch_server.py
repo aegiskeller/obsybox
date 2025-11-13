@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     from obsyswitch_serial_driver import ObsySwitchSerialController
 except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print(f"Import error: {e}")
     print("Make sure obsyswitch_serial_driver.py is in the same directory")
     sys.exit(1)
 
@@ -268,7 +268,7 @@ def home():
         </script>
     </head>
     <body>
-        <h1>🔌 ObsyBox ASCOM Switch Server</h1>
+        <h1> ObsyBox ASCOM Switch Server</h1>
         <p>This is the web interface for your Arduino relay controller ASCOM driver.</p>
         
         <div class="status">
@@ -282,37 +282,37 @@ def home():
             <h2>Connection Control</h2>
             <button class="btn-connect" onclick="connect()">Connect to Arduino</button>
             <button class="btn-off" onclick="disconnect()">Disconnect</button>
-            <button class="btn-emergency" onclick="emergencyStop()">🚨 EMERGENCY STOP</button>
+            <button class="btn-emergency" onclick="emergencyStop()"> EMERGENCY STOP</button>
         </div>
         
         <div class="status">
             <h2>NINA Integration</h2>
             <p><strong>For NINA ASCOM Setup:</strong></p>
             <ol>
-                <li>In NINA, go to Equipment → Switch</li>
+                <li>In NINA, go to Equipment  Switch</li>
                 <li>Select "ASCOM Switch" as device type</li>
                 <li>Configure server: <code>http://localhost:8080</code></li>
                 <li>Test connection and use switches in sequences</li>
             </ol>
         </div>
         
-        <p><em>Refresh page to update status • Use /status endpoint for JSON data</em></p>
+        <p><em>Refresh page to update status  Use /status endpoint for JSON data</em></p>
     </body>
     </html>
     '''
 
 def main():
     """Main server startup"""
-    print("🚀 Starting ObsyBox ASCOM Switch Server")
+    print(f"Starting ObsyBox ASCOM Switch Server")
     print("=" * 50)
-    print(f"🌐 Server URL: http://localhost:8080")
-    print(f"🔌 ASCOM API: http://localhost:8080/api/v1/switch/0/")
-    print(f"📊 Status: http://localhost:8080/status")
-    print(f"🛑 Stop server: Ctrl+C")
+    print(f"Server URL: http://localhost:8080")
+    print(f"ASCOM API: http://localhost:8080/api/v1/switch/0/")
+    print(f"Status: http://localhost:8080/status")
+    print(f"Stop server: Ctrl+C")
     print("=" * 50)
     print()
-    print("📋 NINA Setup Instructions:")
-    print("1. Equipment → Switch → ASCOM Switch")
+    print(f"NINA Setup Instructions:")
+    print("1. Equipment  Switch  ASCOM Switch")
     print("2. Server: http://localhost:8080") 
     print("3. Test connection")
     print("4. Use switches in sequences")
@@ -322,7 +322,7 @@ def main():
         # Start the Flask server
         app.run(host='0.0.0.0', port=8080, debug=False)
     except KeyboardInterrupt:
-        print("\n👋 Server stopped")
+        print("\nServer stopped")
         if controller:
             controller.disconnect()
 

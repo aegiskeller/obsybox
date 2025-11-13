@@ -1,10 +1,10 @@
-# 🚀 ASCOM Driver Usage Guide for ObsyBox Relay Controller
+# ASCOM Driver Usage Guide for ObsyBox Relay Controller
 
-## 🎯 **Two Ways to Use ASCOM with Your Relay Controller**
+## **Two Ways to Use ASCOM with Relay Controller**
 
-Now that all your relays are working, here are the ways to integrate with NINA and other ASCOM software:
+Now that all the relays are working, lets integrate with NINA and other ASCOM software:
 
-## **Method 1: Direct Python ASCOM Bridge (Recommended)**
+## **Method 1: Direct Python ASCOM Bridge **
 
 ### **Step 1: Create ASCOM Bridge Script**
 ```python
@@ -19,18 +19,18 @@ print("Connecting to relay controller...")
 ascom_switch.Connected = True
 
 if ascom_switch.Connected:
-    print("✅ Connected to Arduino relay controller")
-    print(f"📱 Device: {ascom_switch.controller.device_status.device_name}")
-    print(f"🔌 Available switches: {ascom_switch.MaxSwitch + 1}")
+    print(f"Connected to Arduino relay controller")
+    print(f"Device: {ascom_switch.controller.device_status.device_name}")
+    print(f"Available switches: {ascom_switch.MaxSwitch + 1}")
     
     # Show switch names
     for i in range(ascom_switch.MaxSwitch + 1):
         name = ascom_switch.GetSwitchName(i)
         state = ascom_switch.GetSwitch(i)
-        print(f"   Switch {i}: {name} ({'ON' if state else 'OFF'})")
+        print(f"  Switch {i}: {name} ({'ON' if state else 'OFF'})")
     
     # Example: Control switches
-    print("\n🧪 Testing switch control...")
+    print("\nTesting switch control...")
     
     # Turn on Mount (Switch 0)
     print("Turning on Mount...")
@@ -45,13 +45,13 @@ if ascom_switch.Connected:
     for i in range(ascom_switch.MaxSwitch + 1):
         name = ascom_switch.GetSwitchName(i)
         state = ascom_switch.GetSwitch(i)
-        print(f"   Switch {i}: {name} ({'ON' if state else 'OFF'})")
+        print(f"  Switch {i}: {name} ({'ON' if state else 'OFF'})")
     
     # Disconnect when done
     ascom_switch.Connected = False
-    print("✅ Disconnected")
+    print(f"Disconnected")
 else:
-    print("❌ Failed to connect to Arduino")
+    print(f"Failed to connect to Arduino")
 ```
 
 ### **Step 2: Test the ASCOM Interface**
@@ -66,27 +66,27 @@ python ascom_bridge.py
 In NINA, create sequences with **External Script** instructions:
 
 ```
-🌟 OBSERVATION SEQUENCE
-├── 📄 Sequence Start
-│   └── 🔧 External Script
-│       ├── Program: python3
-│       ├── Arguments: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch/nina_serial_integration.py startup
-│       └── Working Dir: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch
-│
-├── 🔭 Equipment Setup
-│   ├── 🎯 Slew to Target
-│   ├── 🔍 Auto Focus
-│   └── ❄️ Cool Camera
-│
-├── 📸 Imaging Block
-│   ├── 🖼️ Take Images
-│   └── 🔄 Dither & Repeat
-│
-└── 📄 Sequence End
-    └── 🔧 External Script
-        ├── Program: python3
-        ├── Arguments: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch/nina_serial_integration.py shutdown
-        └── Working Dir: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch
+ OBSERVATION SEQUENCE
+  Sequence Start
+     External Script
+        Program: python3
+        Arguments: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch/nina_serial_integration.py startup
+        Working Dir: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch
+
+  Equipment Setup
+     Slew to Target
+     Auto Focus
+     Cool Camera
+
+  Imaging Block
+     Take Images
+     Dither & Repeat
+
+  Sequence End
+      External Script
+         Program: python3
+         Arguments: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch/nina_serial_integration.py shutdown
+         Working Dir: /Users/aegiskeller/Documents/Arduino/obsybox/obsySwitch
 ```
 
 ### **Step 2: NINA Script Configuration**
@@ -122,7 +122,7 @@ import win32com.client
 
 def create_ascom_bridge():
     """Create ASCOM bridge using Windows COM"""
-    try:
+   try:
         # This would integrate with ASCOM Platform
         # Requires advanced Windows COM programming
         pass
@@ -131,7 +131,7 @@ def create_ascom_bridge():
         print("Use Method 1 or 2 instead")
 ```
 
-## 🎮 **Quick Usage Examples**
+## **Quick Usage Examples**
 
 ### **Manual Control:**
 ```bash
@@ -174,7 +174,7 @@ controller.emergency_stop()
 controller.disconnect()
 ```
 
-## 🔌 **Switch Mapping for NINA**
+## **Switch Mapping for NINA**
 
 Your relay controller provides these ASCOM switches:
 
@@ -185,9 +185,9 @@ Your relay controller provides these ASCOM switches:
 | 2 | Focuser Power | Pin 4 | Relay 3 |
 | 3 | Aux Equipment | Pin 5 | Relay 4 |
 
-## 📋 **NINA Integration Checklist**
+## **NINA Integration Checklist**
 
-### **✅ Setup Steps:**
+### ** Setup Steps:**
 1. **Test relay control**: `python nina_serial_integration.py startup`
 2. **Create NINA sequence** with External Script instructions
 3. **Configure script paths** in NINA
@@ -195,14 +195,14 @@ Your relay controller provides these ASCOM switches:
 5. **Test shutdown sequence** in NINA
 6. **Add to actual observation sequences**
 
-### **✅ Verification:**
+### ** Verification:**
 - [ ] All relays click audibly when commanded
 - [ ] NINA startup script runs without errors  
 - [ ] Equipment powers on in correct order
 - [ ] NINA shutdown script turns off all equipment
 - [ ] Emergency stop works from Python script
 
-## 🛠 **Troubleshooting**
+## **Troubleshooting**
 
 ### **Common Issues:**
 1. **"Arduino not found"**
@@ -218,14 +218,14 @@ Your relay controller provides these ASCOM switches:
    - Increase timeout in NINA External Script settings
    - Check for Arduino communication delays
 
-## 🚀 **You're Ready!**
+## **You're Ready!**
 
 Your relay controller now has **full ASCOM compatibility** through the Python driver. You can:
 
-✅ **Control from NINA sequences**  
-✅ **Use ASCOM standard interface**  
-✅ **Integrate with any ASCOM-compatible software**  
-✅ **Manual control via Python scripts**  
-✅ **Emergency stop functionality**  
+ **Control from NINA sequences**  
+ **Use ASCOM standard interface**  
+ **Integrate with any ASCOM-compatible software**  
+ **Manual control via Python scripts**  
+ **Emergency stop functionality**  
 
-**Recommended**: Start with **Method 2** (NINA External Scripts) as it's the most reliable and easiest to set up! 🌟
+**Recommended**: Start with **Method 2** (NINA External Scripts) as it's the most reliable and easiest to set up! 
