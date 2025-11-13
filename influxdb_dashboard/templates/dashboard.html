@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>obsybox Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header .status {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .control-group label {
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        select, button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            cursor: pointer;
+            background: #fff;
+            color: #333;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .stat-card h3 {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+        
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+        
+        .stat-card .unit {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-left: 5px;
+        }
+        
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+        }
+        
+        .chart-container {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        
+        .chart-title {
+            color: #333;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+        }
+        
+        .error {
+            background: rgba(255, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #ff0000;
+        }
+        
+        .info {
+            background: rgba(0, 150, 255, 0.2);
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #0096ff;
+        }
+        
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .auto-refresh input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .tab-button {
+            flex: 1;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .tab-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .tab-button.active {
+            background: #4CAF50;
+            border-color: #45a049;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .tabs {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔭 Obsybox Dashboard</h1>
+        <div class="status" id="status">Loading...</div>
+    </div>
+    
+    <div class="tabs">
+        <button class="tab-button active" onclick="switchTab('environmental')">Environmental Sensors</button>
+        <button class="tab-button" onclick="switchTab('computing')">Computing Resources</button>
+        <button class="tab-button" onclick="switchTab('exploration')">Data Exploration</button>
+    </div>
+    
+    <!-- Environmental Sensors Tab -->
+    <div id="environmental" class="tab-content active">
+        <div class="controls">
+            <div class="control-group">
+                <label for="env-timeRange">Time Range:</label>
+                <select id="env-timeRange">
+                    <option value="1h">Last Hour</option>
+                    <option value="6h" selected>Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button onclick="loadEnvironmentalData()">Refresh Data</button>
+            </div>
+            
+            <div class="control-group auto-refresh">
+                <input type="checkbox" id="env-autoRefresh" onchange="toggleAutoRefresh()">
+                <label for="env-autoRefresh">Auto-refresh (30s)</label>
+            </div>
+        </div>
+        
+        <div class="stats-grid" id="env-statsGrid"></div>
+        <div class="charts-grid" id="env-chartsGrid"></div>
+    </div>
+    
+    <!-- Computing Resources Tab -->
+    <div id="computing" class="tab-content">
+        <div class="controls">
+            <div class="control-group">
+                <label for="comp-timeRange">Time Range:</label>
+                <select id="comp-timeRange">
+                    <option value="1h">Last Hour</option>
+                    <option value="6h" selected>Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button onclick="loadComputingData()">Refresh Data</button>
+            </div>
+            
+            <div class="control-group auto-refresh">
+                <input type="checkbox" id="comp-autoRefresh" onchange="toggleAutoRefresh()">
+                <label for="comp-autoRefresh">Auto-refresh (30s)</label>
+            </div>
+        </div>
+        
+        <div class="stats-grid" id="comp-statsGrid"></div>
+        <div class="charts-grid" id="comp-chartsGrid"></div>
+    </div>
+    
+    <!-- Data Exploration Tab -->
+    <div id="exploration" class="tab-content">
+        <div class="controls">
+            <div class="control-group">
+                <label for="database">Database:</label>
+                <select id="database">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="measurement">Measurement:</label>
+                <select id="measurement">
+                    <option value="">Select database first</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="timeRange">Time Range:</label>
+                <select id="timeRange">
+                    <option value="1h">Last Hour</option>
+                    <option value="6h" selected>Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button onclick="loadData()">Refresh Data</button>
+            </div>
+            
+            <div class="control-group auto-refresh">
+                <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()">
+                <label for="autoRefresh">Auto-refresh (30s)</label>
+            </div>
+        </div>
+        
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="charts-grid" id="chartsGrid"></div>
+    </div>
+    
+    <script>
+        let autoRefreshInterval = null;
+        let currentTab = 'environmental';
+        
+        // Tab switching
+        function switchTab(tabName) {
+            // Update tab buttons
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update tab content
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            
+            // Clear auto-refresh and reload data for new tab
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                
+                // Uncheck all auto-refresh boxes
+                document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+            }
+            
+            currentTab = tabName;
+            
+            // Load data for the active tab
+            if (tabName === 'environmental') {
+                loadEnvironmentalData();
+            } else if (tabName === 'computing') {
+                loadComputingData();
+            } else if (tabName === 'exploration') {
+                loadDatabases();
+            }
+        }
+        
+        // Load Environmental Sensors data (sensor_data database)
+        async function loadEnvironmentalData() {
+            const timeRange = document.getElementById('env-timeRange').value;
+            document.getElementById('status').textContent = 'Loading environmental sensor data...';
+            
+            try {
+                const database = 'sensor_data';
+                
+                // Get measurements for sensor_data
+                const measurementsResponse = await fetch(`/api/measurements?database=${database}`);
+                const measurements = await measurementsResponse.json();
+                
+                if (measurements.length === 0) {
+                    document.getElementById('env-statsGrid').innerHTML = '<div class="info">No measurements found in sensor_data database</div>';
+                    document.getElementById('env-chartsGrid').innerHTML = '';
+                    return;
+                }
+                
+                // Combine data from all measurements
+                let allStats = {};
+                let allCharts = [];
+                
+                for (const measurement of measurements) {
+                    const fieldsResponse = await fetch(`/api/fields/${encodeURIComponent(measurement)}?database=${database}`);
+                    const fields = await fieldsResponse.json();
+                    
+                    const dataResponse = await fetch(`/api/data/${encodeURIComponent(measurement)}?range=${timeRange}&database=${database}`);
+                    const data = await dataResponse.json();
+                    
+                    const latestResponse = await fetch(`/api/latest/${encodeURIComponent(measurement)}?database=${database}`);
+                    const latest = await latestResponse.json();
+                    
+                    // Collect stats
+                    if (latest && Object.keys(latest).length > 0) {
+                        allStats[measurement] = { latest, fields };
+                    }
+                    
+                    // Collect chart data
+                    if (data && data.length > 0) {
+                        allCharts.push({ measurement, data, fields });
+                    }
+                }
+                
+                displayEnvironmentalStats(allStats);
+                displayEnvironmentalCharts(allCharts);
+                
+                const totalPoints = allCharts.reduce((sum, chart) => sum + chart.data.length, 0);
+                document.getElementById('status').textContent = 
+                    `Environmental Sensors | Last updated: ${new Date().toLocaleTimeString()} | ${totalPoints} data points`;
+            } catch (error) {
+                console.error('Error loading environmental data:', error);
+                showError('Failed to load environmental data: ' + error.message);
+            }
+        }
+        
+        // Load Computing Resources data (system_monitoring database)
+        async function loadComputingData() {
+            const timeRange = document.getElementById('comp-timeRange').value;
+            document.getElementById('status').textContent = 'Loading system monitoring data...';
+            
+            try {
+                const database = 'system_monitoring';
+                
+                // Get measurements
+                const measurementsResponse = await fetch(`/api/measurements?database=${database}`);
+                const measurements = await measurementsResponse.json();
+                
+                if (measurements.length === 0) {
+                    document.getElementById('comp-statsGrid').innerHTML = '<div class="info">No measurements found in system_monitoring database</div>';
+                    document.getElementById('comp-chartsGrid').innerHTML = '';
+                    return;
+                }
+                
+                // Combine data from all measurements
+                let allStats = {};
+                let allCharts = [];
+                
+                for (const measurement of measurements) {
+                    const fieldsResponse = await fetch(`/api/fields/${encodeURIComponent(measurement)}?database=${database}`);
+                    const fields = await fieldsResponse.json();
+                    
+                    const dataResponse = await fetch(`/api/data/${encodeURIComponent(measurement)}?range=${timeRange}&database=${database}`);
+                    const data = await dataResponse.json();
+                    
+                    const latestResponse = await fetch(`/api/latest/${encodeURIComponent(measurement)}?database=${database}`);
+                    const latest = await latestResponse.json();
+                    
+                    if (latest && Object.keys(latest).length > 0) {
+                        allStats[measurement] = { latest, fields };
+                    }
+                    
+                    if (data && data.length > 0) {
+                        allCharts.push({ measurement, data, fields });
+                    }
+                }
+                
+                displayComputingStats(allStats);
+                displayComputingCharts(allCharts);
+                
+                const totalPoints = allCharts.reduce((sum, chart) => sum + chart.data.length, 0);
+                document.getElementById('status').textContent = 
+                    `Computing Resources | Last updated: ${new Date().toLocaleTimeString()} | ${totalPoints} data points`;
+            } catch (error) {
+                console.error('Error loading computing data:', error);
+                showError('Failed to load computing data: ' + error.message);
+            }
+        }
+        
+        // Display environmental stats
+        function displayEnvironmentalStats(allStats) {
+            const statsGrid = document.getElementById('env-statsGrid');
+            
+            if (Object.keys(allStats).length === 0) {
+                statsGrid.innerHTML = '<div class="info">No data available</div>';
+                return;
+            }
+            
+            let statsHTML = '';
+            
+            for (const [measurement, {latest, fields}] of Object.entries(allStats)) {
+                const numericFields = fields.filter(f => f.type === 'float' || f.type === 'integer');
+                
+                numericFields.forEach(field => {
+                    const value = latest[field.name];
+                    if (value === undefined || value === null) return;
+                    
+                    const displayValue = typeof value === 'number' ? value.toFixed(2) : value;
+                    
+                    statsHTML += `
+                        <div class="stat-card">
+                            <h3>${formatFieldName(measurement)} - ${formatFieldName(field.name)}</h3>
+                            <div class="value">${displayValue}<span class="unit">${getUnit(field.name)}</span></div>
+                        </div>
+                    `;
+                });
+            }
+            
+            statsGrid.innerHTML = statsHTML;
+        }
+        
+        // Display computing stats
+        function displayComputingStats(allStats) {
+            const statsGrid = document.getElementById('comp-statsGrid');
+            
+            if (Object.keys(allStats).length === 0) {
+                statsGrid.innerHTML = '<div class="info">No data available</div>';
+                return;
+            }
+            
+            let statsHTML = '';
+            
+            for (const [measurement, {latest, fields}] of Object.entries(allStats)) {
+                const numericFields = fields.filter(f => f.type === 'float' || f.type === 'integer');
+                
+                numericFields.forEach(field => {
+                    const value = latest[field.name];
+                    if (value === undefined || value === null) return;
+                    
+                    const displayValue = typeof value === 'number' ? value.toFixed(2) : value;
+                    
+                    statsHTML += `
+                        <div class="stat-card">
+                            <h3>${formatFieldName(measurement)} - ${formatFieldName(field.name)}</h3>
+                            <div class="value">${displayValue}<span class="unit">${getUnit(field.name)}</span></div>
+                        </div>
+                    `;
+                });
+            }
+            
+            statsGrid.innerHTML = statsHTML;
+        }
+        
+        // Display environmental charts
+        function displayEnvironmentalCharts(allCharts) {
+            const chartsGrid = document.getElementById('env-chartsGrid');
+            
+            if (allCharts.length === 0) {
+                chartsGrid.innerHTML = '<div class="info">⚠️ No data available for selected time range. Try selecting a longer time range (7d or 30d).</div>';
+                return;
+            }
+            
+            chartsGrid.innerHTML = '';
+            
+            // Field categories
+            const tempFields = ['temperature', 'temp', 'ambtemp', 'ambient', 'sky', 'skytemp', 'aht10_temp'];
+            const humidityFields = ['humidity', 'hum', 'aht10_hum'];
+            const rainFields = ['rain', 'rainsensor'];
+            
+            // Collect data by category
+            let tempTracesData = {};
+            let humidityTracesData = {};
+            let rainData = null;
+            let hasTemperatureData = false;
+            let hasHumidityData = false;
+            
+            allCharts.forEach(({measurement, data, fields}) => {
+                fields.forEach(field => {
+                    const fieldName = field.name.toLowerCase();
+                    const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
+                    if (fieldData.length === 0) return;
+                    
+                    // Temperature fields
+                    if (tempFields.some(tf => fieldName.includes(tf))) {
+                        hasTemperatureData = true;
+                        const traceName = formatFieldName(field.name);
+                        if (!tempTracesData[traceName]) {
+                            tempTracesData[traceName] = { x: [], y: [] };
+                        }
+                        fieldData.forEach(d => {
+                            tempTracesData[traceName].x.push(d.time);
+                            tempTracesData[traceName].y.push(d[field.name]);
+                        });
+                    }
+                    // Humidity fields
+                    else if (humidityFields.some(hf => fieldName.includes(hf))) {
+                        hasHumidityData = true;
+                        const traceName = 'AHT10';  // Use AHT10 as legend name
+                        if (!humidityTracesData[traceName]) {
+                            humidityTracesData[traceName] = { x: [], y: [] };
+                        }
+                        fieldData.forEach(d => {
+                            humidityTracesData[traceName].x.push(d.time);
+                            humidityTracesData[traceName].y.push(d[field.name]);
+                        });
+                    }
+                    // Rain sensor
+                    else if (rainFields.some(rf => fieldName.includes(rf))) {
+                        rainData = {
+                            x: fieldData.map(d => d.time),
+                            y: fieldData.map(d => d[field.name]),
+                            measurement: measurement,
+                            fieldName: field.name
+                        };
+                    }
+                });
+            });
+            
+            // 1. Rain Sensor Chart (Top position)
+            if (rainData) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = 'env-chart-rain-sensor';
+                chartsGrid.appendChild(chartDiv);
+                
+                const yValues = rainData.y;
+                const minY = Math.min(...yValues);
+                const maxY = Math.max(...yValues);
+                
+                const trace = {
+                    x: rainData.x,
+                    y: rainData.y,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Rain Sensor',
+                    line: { width: 2 },
+                    marker: { size: 4 }
+                };
+                
+                const layout = {
+                    title: {
+                        text: 'Rain Sensor',
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: { title: 'Time', type: 'date' },
+                    yaxis: { 
+                        title: 'ADU (8-bit)',
+                        range: [minY, maxY]  // Keep to min/max
+                    },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF',
+                    shapes: [
+                        {
+                            // Green zone (no rain): below 450
+                            type: 'rect',
+                            xref: 'paper',
+                            yref: 'y',
+                            x0: 0,
+                            x1: 1,
+                            y0: minY,
+                            y1: 450,
+                            fillcolor: 'rgba(0, 255, 0, 0.2)',  // Green
+                            line: { width: 0 }
+                        },
+                        {
+                            // Red zone (rain): above 999
+                            type: 'rect',
+                            xref: 'paper',
+                            yref: 'y',
+                            x0: 0,
+                            x1: 1,
+                            y0: 999,
+                            y1: maxY,
+                            fillcolor: 'rgba(255, 0, 0, 0.2)',  // Red
+                            line: { width: 0 }
+                        }
+                    ]
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, [trace], layout, config);
+            }
+            
+            // 2. Temperature Chart
+            if (hasTemperatureData) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = 'env-chart-temperatures-combined';
+                chartsGrid.appendChild(chartDiv);
+                
+                // Find minimum sky temperature for y-axis range
+                let minSkyTemp = 0;
+                for (const [traceName, traceData] of Object.entries(tempTracesData)) {
+                    if (traceName.toLowerCase().includes('sky')) {
+                        const skyMin = Math.min(...traceData.y);
+                        minSkyTemp = Math.min(minSkyTemp, skyMin);
+                    }
+                }
+                
+                // Create traces
+                const traces = [];
+                for (const [traceName, traceData] of Object.entries(tempTracesData)) {
+                    traces.push({
+                        x: traceData.x,
+                        y: traceData.y,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: traceName,
+                        line: { width: 2 },
+                        marker: { size: 4 }
+                    });
+                }
+                
+                const layout = {
+                    title: {
+                        text: 'Temperatures',
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: { title: 'Time', type: 'date' },
+                    yaxis: { title: '°C' },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF',
+                    shapes: [{
+                        type: 'rect',
+                        xref: 'paper',
+                        yref: 'y',
+                        x0: 0,
+                        x1: 1,
+                        y0: minSkyTemp,  // Use current min sky temp instead of -100
+                        y1: -5,          // End at -5°C
+                        fillcolor: 'rgba(0, 255, 0, 0.2)',  // Green with transparency
+                        line: { width: 0 }
+                    }]
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, traces, layout, config);
+            }
+            
+            // 3. Humidity Chart
+            if (hasHumidityData) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = 'env-chart-humidity-combined';
+                chartsGrid.appendChild(chartDiv);
+                
+                // Create traces
+                const traces = [];
+                for (const [traceName, traceData] of Object.entries(humidityTracesData)) {
+                    traces.push({
+                        x: traceData.x,
+                        y: traceData.y,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: traceName,  // Will show "AHT10" in legend
+                        line: { width: 2 },
+                        marker: { size: 4 }
+                    });
+                }
+                
+                const layout = {
+                    title: {
+                        text: 'Humidity',
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: { title: 'Time', type: 'date' },
+                    yaxis: { title: '%' },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF'
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, traces, layout, config);
+            }
+            
+            // 4. Display other remaining fields
+            allCharts.forEach(({measurement, data, fields}) => {
+                const numericFields = fields.filter(f => {
+                    const fieldName = f.name.toLowerCase();
+                    const isTemp = tempFields.some(tf => fieldName.includes(tf));
+                    const isHumidity = humidityFields.some(hf => fieldName.includes(hf));
+                    const isRain = rainFields.some(rf => fieldName.includes(rf));
+                    return (f.type === 'float' || f.type === 'integer') && !isTemp && !isHumidity && !isRain;
+                });
+                
+                numericFields.forEach(field => {
+                    const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
+                    if (fieldData.length === 0) return;
+                    
+                    const chartDiv = document.createElement('div');
+                    chartDiv.className = 'chart-container';
+                    chartDiv.id = `env-chart-${measurement}-${field.name}`;
+                    chartsGrid.appendChild(chartDiv);
+                    
+                    const trace = {
+                        x: fieldData.map(d => d.time),
+                        y: fieldData.map(d => d[field.name]),
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: formatFieldName(field.name),
+                        line: { width: 2 },
+                        marker: { size: 4 }
+                    };
+                    
+                    const layout = {
+                        title: {
+                            text: `${formatFieldName(measurement)} - ${formatFieldName(field.name)}`,
+                            font: { size: 16, color: '#333' }
+                        },
+                        xaxis: { title: 'Time', type: 'date' },
+                        yaxis: { title: getUnit(field.name) },
+                        margin: { t: 40, r: 20, b: 40, l: 60 },
+                        height: 300,
+                        plot_bgcolor: '#E6F3FF',
+                        paper_bgcolor: '#FFFFFF'
+                    };
+                    
+                    const config = {
+                        responsive: true,
+                        displayModeBar: true,
+                        displaylogo: false
+                    };
+                    
+                    Plotly.newPlot(chartDiv, [trace], layout, config);
+                });
+            });
+        }
+        
+        // Display computing charts with color by hostname
+        function displayComputingCharts(allCharts) {
+            const chartsGrid = document.getElementById('comp-chartsGrid');
+            
+            if (allCharts.length === 0) {
+                chartsGrid.innerHTML = '<div class="info">⚠️ No data available for selected time range. Try selecting a longer time range (7d or 30d).</div>';
+                return;
+            }
+            
+            chartsGrid.innerHTML = '';
+            
+            // Color palette for different hostnames
+            const colorPalette = [
+                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+            ];
+            
+            // Custom unit mapping for computing resources
+            function getComputingUnit(fieldName, fieldIndex) {
+                const name = fieldName.toLowerCase();
+                
+                // Percentage fields (first two plots)
+                if (name.includes('percent') || name.includes('usage') || name.includes('cpu') && !name.includes('temp')) {
+                    return '%';
+                }
+                // Memory/Disk in GB (third plot)
+                if (name.includes('memory') || name.includes('disk') || name.includes('ram')) {
+                    if (name.includes('used') || name.includes('free') || name.includes('total') || name.includes('available')) {
+                        return 'GB';
+                    }
+                }
+                // WiFi signal strength (last plot)
+                if (name.includes('wifi') || name.includes('signal') || name.includes('rssi')) {
+                    return 'dBm';
+                }
+                // Temperature
+                if (name.includes('temp')) {
+                    return '°C';
+                }
+                
+                return getUnit(fieldName);
+            }
+            
+            allCharts.forEach(({measurement, data, fields}, chartIndex) => {
+                const numericFields = fields.filter(f => f.type === 'float' || f.type === 'integer');
+                
+                numericFields.forEach((field, fieldIndex) => {
+                    const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
+                    if (fieldData.length === 0) return;
+                    
+                    const chartDiv = document.createElement('div');
+                    chartDiv.className = 'chart-container';
+                    chartDiv.id = `comp-chart-${measurement}-${field.name}`;
+                    chartsGrid.appendChild(chartDiv);
+                    
+                    // Group data by hostname
+                    const dataByHostname = {};
+                    fieldData.forEach(d => {
+                        const hostname = d.hostname || d.host || 'unknown';
+                        if (!dataByHostname[hostname]) {
+                            dataByHostname[hostname] = [];
+                        }
+                        dataByHostname[hostname].push(d);
+                    });
+                    
+                    // Create a trace for each hostname
+                    const traces = [];
+                    const hostnames = Object.keys(dataByHostname).sort();
+                    
+                    hostnames.forEach((hostname, index) => {
+                        const hostnameData = dataByHostname[hostname];
+                        const color = colorPalette[index % colorPalette.length];
+                        
+                        traces.push({
+                            x: hostnameData.map(d => d.time),
+                            y: hostnameData.map(d => d[field.name]),
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: hostname,
+                            line: { width: 2, color: color },
+                            marker: { size: 4, color: color }
+                        });
+                    });
+                    
+                    const layout = {
+                        title: {
+                            text: `${formatFieldName(measurement)} - ${formatFieldName(field.name)}`,
+                            font: { size: 16, color: '#333' }
+                        },
+                        xaxis: { title: 'Time', type: 'date' },
+                        yaxis: { title: getComputingUnit(field.name, fieldIndex) },
+                        margin: { t: 40, r: 20, b: 100, l: 60 },  // Increased bottom margin for legend
+                        height: 350,  // Increased height to accommodate legend
+                        plot_bgcolor: '#E6F3FF',
+                        paper_bgcolor: '#FFFFFF',
+                        showlegend: true,
+                        legend: {
+                            orientation: 'h',
+                            yanchor: 'top',
+                            y: -0.25,  // Position legend below x-axis
+                            xanchor: 'center',
+                            x: 0.5
+                        }
+                    };
+                    
+                    const config = {
+                        responsive: true,
+                        displayModeBar: true,
+                        displaylogo: false
+                    };
+                    
+                    Plotly.newPlot(chartDiv, traces, layout, config);
+                });
+            });
+        }
+        
+        // Load databases on page load
+        async function loadDatabases() {
+            try {
+                const response = await fetch('/api/databases');
+                const databases = await response.json();
+                
+                const select = document.getElementById('database');
+                select.innerHTML = databases.map(db => 
+                    `<option value="${db}">${db}</option>`
+                ).join('');
+                
+                // Load measurements for first database
+                if (databases.length > 0) {
+                    loadMeasurements(databases[0]);
+                }
+            } catch (error) {
+                console.error('Error loading databases:', error);
+                showError('Failed to load databases');
+            }
+        }
+        
+        // Load measurements for selected database
+        async function loadMeasurements(database) {
+            try {
+                const response = await fetch(`/api/measurements?database=${database}`);
+                const measurements = await response.json();
+                
+                const select = document.getElementById('measurement');
+                select.innerHTML = measurements.map(m => 
+                    `<option value="${m}">${m}</option>`
+                ).join('');
+                
+                // Load data for first measurement
+                if (measurements.length > 0) {
+                    loadData();
+                }
+            } catch (error) {
+                console.error('Error loading measurements:', error);
+                showError('Failed to load measurements');
+            }
+        }
+        
+        // Load and display data
+        async function loadData() {
+            const measurement = document.getElementById('measurement').value;
+            const timeRange = document.getElementById('timeRange').value;
+            const database = document.getElementById('database').value;
+            
+            if (!measurement) {
+                showError('Please select a measurement');
+                return;
+            }
+            
+            if (!database) {
+                showError('Please select a database');
+                return;
+            }
+            
+            document.getElementById('status').textContent = 'Loading data...';
+            
+            try {
+                // Get fields for this measurement
+                const fieldsResponse = await fetch(`/api/fields/${encodeURIComponent(measurement)}?database=${database}`);
+                const fields = await fieldsResponse.json();
+                
+                // Get data
+                const dataResponse = await fetch(`/api/data/${encodeURIComponent(measurement)}?range=${timeRange}&database=${database}`);
+                const data = await dataResponse.json();
+                
+                // Get latest values
+                const latestResponse = await fetch(`/api/latest/${encodeURIComponent(measurement)}?database=${database}`);
+                const latest = await latestResponse.json();
+                
+                displayStats(latest, fields);
+                displayCharts(data, fields, measurement);
+                
+                document.getElementById('status').textContent = 
+                    `Last updated: ${new Date().toLocaleTimeString()} | ${data.length} data points`;
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showError('Failed to load data: ' + error.message);
+            }
+        }
+        
+        // Display latest values as stats
+        function displayStats(latest, fields) {
+            const statsGrid = document.getElementById('statsGrid');
+            
+            if (!latest || Object.keys(latest).length === 0) {
+                statsGrid.innerHTML = '<div class="info">No data available</div>';
+                return;
+            }
+            
+            const numericFields = fields.filter(f => 
+                f.type === 'float' || f.type === 'integer'
+            );
+            
+            statsGrid.innerHTML = numericFields.map(field => {
+                const value = latest[field.name];
+                if (value === undefined || value === null) return '';
+                
+                const displayValue = typeof value === 'number' ? 
+                    value.toFixed(2) : value;
+                
+                return `
+                    <div class="stat-card">
+                        <h3>${formatFieldName(field.name)}</h3>
+                        <div class="value">${displayValue}<span class="unit">${getUnit(field.name)}</span></div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Display time-series charts
+        function displayCharts(data, fields, measurement) {
+            const chartsGrid = document.getElementById('chartsGrid');
+            
+            if (!data || data.length === 0) {
+                chartsGrid.innerHTML = '<div class="info">⚠️ No data available for selected time range. Try selecting a longer time range (7d or 30d) or check if data is being written to this measurement.</div>';
+                return;
+            }
+            
+            // Show date range of data
+            const dates = data.map(d => new Date(d.time));
+            const minDate = new Date(Math.min(...dates));
+            const maxDate = new Date(Math.max(...dates));
+            
+            const numericFields = fields.filter(f => 
+                f.type === 'float' || f.type === 'integer'
+            );
+            
+            if (numericFields.length === 0) {
+                chartsGrid.innerHTML = '<div class="info">No numeric fields found to chart</div>';
+                return;
+            }
+            
+            chartsGrid.innerHTML = `<div class="info">📅 Data range: ${minDate.toLocaleString()} to ${maxDate.toLocaleString()}</div>`;
+            
+            numericFields.forEach(field => {
+                const fieldData = data.filter(d => d[field.name] !== undefined && d[field.name] !== null);
+                if (fieldData.length === 0) return;
+                
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.id = `chart-${field.name}`;
+                chartsGrid.appendChild(chartDiv);
+                
+                const trace = {
+                    x: fieldData.map(d => d.time),
+                    y: fieldData.map(d => d[field.name]),
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: formatFieldName(field.name),
+                    line: { width: 2 },
+                    marker: { size: 4 }
+                };
+                
+                const layout = {
+                    title: {
+                        text: formatFieldName(field.name),
+                        font: { size: 16, color: '#333' }
+                    },
+                    xaxis: {
+                        title: 'Time',
+                        type: 'date'
+                    },
+                    yaxis: {
+                        title: getUnit(field.name)
+                    },
+                    margin: { t: 40, r: 20, b: 40, l: 60 },
+                    height: 300,
+                    plot_bgcolor: '#E6F3FF',
+                    paper_bgcolor: '#FFFFFF'
+                };
+                
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false
+                };
+                
+                Plotly.newPlot(chartDiv, [trace], layout, config);
+            });
+        }
+        
+        // Helper functions
+        function formatFieldName(name) {
+            return name
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        function getUnit(fieldName) {
+            const units = {
+                // Environmental sensors
+                'ambtemp': '°C',
+                'teltemp': '°C',
+                'temperature': '°C',
+                'temp': '°C',
+                'dewpt': '°C',
+                'deltat': '°C',
+                'ambhum': '%',
+                'humidity': '%',
+                'heaterpower': '%',
+                'windspeed': 'm/s',
+                'lux': 'lux',
+                'ambient': 'lux',
+                'sky': '°C',
+                'power': 'W',
+                'voltage': 'V',
+                'current': 'A',
+                'clouds': '%',
+                'weather': '',  // String field
+                
+                // System monitoring
+                'cpu_usage': '%',
+                'cpu_percent': '%',
+                'memory_usage': '%',
+                'memory_percent': '%',
+                'disk_usage': '%',
+                'disk_percent': '%',
+                'cpu_temp': '°C',
+                'cpu_temperature': '°C',
+                'memory_used': 'MB',
+                'memory_available': 'MB',
+                'memory_total': 'MB',
+                'disk_used': 'GB',
+                'disk_free': 'GB',
+                'disk_total': 'GB',
+                'network_sent': 'MB',
+                'network_recv': 'MB',
+                'uptime': 'hours'
+            };
+            
+            return units[fieldName.toLowerCase()] || '';
+        }
+        
+        function showError(message) {
+            document.getElementById('status').textContent = 'Error: ' + message;
+        }
+        
+        function toggleAutoRefresh() {
+            // Clear any existing interval
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            
+            // Check which tab is active and if its checkbox is checked
+            let isChecked = false;
+            
+            if (currentTab === 'environmental') {
+                isChecked = document.getElementById('env-autoRefresh').checked;
+            } else if (currentTab === 'computing') {
+                isChecked = document.getElementById('comp-autoRefresh').checked;
+            } else if (currentTab === 'exploration') {
+                isChecked = document.getElementById('autoRefresh').checked;
+            }
+            
+            if (isChecked) {
+                // Start auto-refresh for current tab
+                autoRefreshInterval = setInterval(() => {
+                    if (currentTab === 'environmental') {
+                        loadEnvironmentalData();
+                    } else if (currentTab === 'computing') {
+                        loadComputingData();
+                    } else if (currentTab === 'exploration') {
+                        loadData();
+                    }
+                }, 30000); // 30 seconds
+            }
+        }
+        
+        // Event listeners for exploration tab
+        document.getElementById('database').addEventListener('change', (e) => {
+            loadMeasurements(e.target.value);
+        });
+        
+        document.getElementById('measurement').addEventListener('change', loadData);
+        document.getElementById('timeRange').addEventListener('change', loadData);
+        
+        // Event listeners for environmental tab
+        document.getElementById('env-timeRange').addEventListener('change', loadEnvironmentalData);
+        
+        // Event listeners for computing tab
+        document.getElementById('comp-timeRange').addEventListener('change', loadComputingData);
+        
+        // Initialize - load databases for exploration tab and environmental data
+        loadDatabases();
+        loadEnvironmentalData();
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-# 🎯 NINA Integration Guide for ObsyBox ASCOM Relay Switch
+# NINA Integration Guide for ObsyBox ASCOM Relay Switch
 
 ## Quick Start Summary
 
@@ -15,12 +15,12 @@ python alpaca_switch_server.py
 
 You should see:
 ```
-🚀 Starting ObsyBox ASCOM Alpaca Switch Server
-🌐 Server URL: http://localhost:11111
-🔌 ASCOM API: http://localhost:11111/api/v1/switch/0/
-📋 NINA Discovery Instructions:
-1. Equipment → Switch → ASCOM Switch
-2. Setup → Enter: http://localhost:11111
+ Starting ObsyBox ASCOM Alpaca Switch Server
+ Server URL: http://localhost:11111
+ ASCOM API: http://localhost:11111/api/v1/switch/0/
+ NINA Discovery Instructions:
+1. Equipment  Switch  ASCOM Switch
+2. Setup  Enter: http://localhost:11111
 3. Connect and test switches
 ```
 
@@ -32,7 +32,7 @@ You should see:
 3. Find the **Switch** section
 
 #### Add ASCOM Switch Device
-1. Click the **gear icon** ⚙️ next to Switch
+1. Click the **gear icon**  next to Switch
 2. Select **"ASCOM Switch"** from the dropdown
 3. Click **"Choose ASCOM Switch"** button
 
@@ -56,7 +56,7 @@ You should see:
 ### 3. Test the Switches
 
 #### Manual Testing in Equipment Tab
-1. In the NINA Equipment → Switch section
+1. In the NINA Equipment  Switch section
 2. Click the **toggle buttons** next to each switch name
 3. You should **hear the relays clicking** on your Arduino
 4. The LED indicators should change state
@@ -82,12 +82,12 @@ You should see:
 
 #### Example Observatory Startup Sequence
 ```
-1. Switch Instruction - Mount (ID: 0) → ON
-   └── Wait 2 seconds
-2. Switch Instruction - Camera (ID: 1) → ON  
-   └── Wait 5 seconds
-3. Switch Instruction - Focuser (ID: 2) → ON
-   └── Wait 2 seconds
+1. Switch Instruction - Mount (ID: 0)  ON
+    Wait 2 seconds
+2. Switch Instruction - Camera (ID: 1)  ON  
+    Wait 5 seconds
+3. Switch Instruction - Focuser (ID: 2)  ON
+    Wait 2 seconds
 4. Cool Camera instruction
 5. Slew to target instruction
 6. Take Exposure instruction
@@ -97,9 +97,9 @@ You should see:
 ```
 1. Warm Camera instruction
 2. Park Mount instruction
-3. Switch Instruction - Focuser (ID: 2) → OFF
-4. Switch Instruction - Camera (ID: 1) → OFF
-5. Switch Instruction - Mount (ID: 0) → OFF
+3. Switch Instruction - Focuser (ID: 2)  OFF
+4. Switch Instruction - Camera (ID: 1)  OFF
+5. Switch Instruction - Mount (ID: 0)  OFF
 ```
 
 ### 5. Advanced Sequence Usage
@@ -121,19 +121,19 @@ You should see:
 ### Common Issues
 
 #### Switch Not Appearing in NINA
-- ✅ **Check**: Is the Alpaca server running? (`python alpaca_switch_server.py`)
-- ✅ **Check**: Is Arduino connected via USB?
-- ✅ **Check**: Can you access http://localhost:11111/status in browser?
+-  **Check**: Is the Alpaca server running? (`python alpaca_switch_server.py`)
+-  **Check**: Is Arduino connected via USB?
+-  **Check**: Can you access http://localhost:11111/status in browser?
 
 #### "Not Connected" Error
-- ✅ **Check**: Arduino USB cable connection
-- ✅ **Check**: Arduino programmed with `RelayController_Serial.ino`
-- ✅ **Check**: No other software using the serial port (Arduino IDE Serial Monitor)
+-  **Check**: Arduino USB cable connection
+-  **Check**: Arduino programmed with `RelayController_Serial.ino`
+-  **Check**: No other software using the serial port (Arduino IDE Serial Monitor)
 
 #### Relays Not Clicking
-- ✅ **Check**: Relay module power (red LED should be on)
-- ✅ **Check**: Jumper configuration (see `RELAY_JUMPER_GUIDE.md`)
-- ✅ **Check**: All connections secure
+-  **Check**: Relay module power (red LED should be on)
+-  **Check**: Jumper configuration (see `RELAY_JUMPER_GUIDE.md`)
+-  **Check**: All connections secure
 
 ### Diagnostic Commands
 
@@ -200,6 +200,6 @@ The switch can be controlled based on weather conditions, target schedules, and 
 
 ---
 
-🎯 **You now have professional-grade ASCOM switch control directly in NINA!**
+ **You now have professional-grade ASCOM switch control directly in NINA!**
 
 Your Arduino Uno appears as a native ASCOM device alongside your mount, camera, and other observatory equipment. Use it for automated startup/shutdown sequences, equipment power management, and advanced observatory automation workflows.

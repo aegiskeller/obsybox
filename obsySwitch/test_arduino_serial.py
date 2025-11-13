@@ -25,23 +25,23 @@ def test_arduino_communication():
     port = find_arduino_port()
     
     if not port:
-        print("❌ No Arduino found")
+        print(f"No Arduino found")
         return
     
-    print(f"🔌 Connecting to {port}")
+    print(f"Connecting to {port}")
     
     try:
         # Open serial connection
         ser = serial.Serial(port, 9600, timeout=5)
         
         # Wait for Arduino to boot
-        print("⏱️  Waiting for Arduino to initialize...")
+        print(f"Waiting for Arduino to initialize...")
         time.sleep(3)
         
         # Clear buffer
         ser.reset_input_buffer()
         
-        print("\n📥 Reading raw Arduino output for 10 seconds...")
+        print("\n Reading raw Arduino output for 10 seconds...")
         print("-" * 50)
         
         start_time = time.time()
@@ -59,7 +59,7 @@ def test_arduino_communication():
         print("-" * 50)
         
         # Test sending commands
-        print("\n📤 Testing commands...")
+        print("\nTesting commands...")
         
         commands = ["PING", "GET_STATUS", "GET_RELAY,1"]
         
@@ -87,10 +87,10 @@ def test_arduino_communication():
                 print("<<< No response")
         
         ser.close()
-        print("\n✅ Test completed")
+        print("\n Test completed")
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     test_arduino_communication()

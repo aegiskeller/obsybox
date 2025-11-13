@@ -15,13 +15,13 @@ The ObsyBox Relay Controller provides WiFi-enabled control of up to 4 relay chan
 ### Wiring Diagram
 
 ```
-NodeMCU ESP8266      →    4-Channel Relay Module
-Pin D1               →    Relay 1 (Mount)
-Pin D2               →    Relay 2 (Camera)
-Pin D3               →    Relay 3 (Focuser)  
-Pin D4               →    Relay 4 (Aux)
-3V3                  →    VCC (if 3.3V relay) OR 5V → VCC (if 5V relay)
-GND                  →    GND
+NodeMCU ESP8266      �    4-Channel Relay Module
+Pin D1               �    Relay 1 (Mount)
+Pin D2               �    Relay 2 (Camera)
+Pin D3               �    Relay 3 (Focuser)  
+Pin D4               �    Relay 4 (Aux)
+3V3                  �    VCC (if 3.3V relay) OR 5V � VCC (if 5V relay)
+GND                  �    GND
 ```
 
 **Note**: Most relay modules are **active LOW**, meaning a LOW signal turns the relay ON. The code handles this automatically with the `relayInvert` setting.
@@ -29,26 +29,26 @@ GND                  →    GND
 ## Features
 
 ### Arduino Firmware
-- ✅ WiFi connectivity with static IP assignment
-- ✅ MQTT integration for status reporting
-- ✅ Web interface for manual control
-- ✅ RESTful API for programmatic access
-- ✅ EEPROM storage for persistent relay states
-- ✅ Watchdog timer for reliability
-- ✅ Status LED indication
-- ✅ JSON-based communication
+-  WiFi connectivity with static IP assignment
+-  MQTT integration for status reporting
+-  Web interface for manual control
+-  RESTful API for programmatic access
+-  EEPROM storage for persistent relay states
+-  Watchdog timer for reliability
+-  Status LED indication
+-  JSON-based communication
 
 ### Python Driver
-- ✅ ASCOM-compatible switch interface
-- ✅ Automatic device discovery
-- ✅ Error handling and retry logic
-- ✅ Status monitoring and logging
-- ✅ Performance optimization
+-  ASCOM-compatible switch interface
+-  Automatic device discovery
+-  Error handling and retry logic
+-  Status monitoring and logging
+-  Performance optimization
 
 ### NINA Integration
-- ✅ Compatible with NINA's switch interface
-- ✅ Schedulable equipment control
-- ✅ Safety interlocks and emergency stop
+-  Compatible with NINA's switch interface
+-  Schedulable equipment control
+-  Safety interlocks and emergency stop
 
 ## Quick Start
 
@@ -311,7 +311,7 @@ curl -X POST http://192.168.1.76/relay/1/off
 
 ## Safety Considerations
 
-⚠️ **Important Safety Notes**:
+ **Important Safety Notes**:
 
 - Use appropriate fuses/circuit breakers for connected equipment
 - Ensure relay ratings exceed load requirements  

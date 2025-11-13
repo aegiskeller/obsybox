@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     from obsyswitch_serial_driver import ObsySwitchSerialController
 except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print(f"Import error: {e}")
     print("Make sure obsyswitch_serial_driver.py is in the same directory")
     print("And that pyserial is installed: pip install pyserial")
     sys.exit(1)
@@ -79,12 +79,12 @@ EQUIPMENT_CONFIG = {
 def log_action(action, success=True, details=""):
     """Log actions with timestamp for NINA log correlation"""
     timestamp = datetime.now().isoformat()
-    status = "✅ SUCCESS" if success else "❌ FAILED"
+    status = " SUCCESS" if success else " FAILED"
     message = f"{status} {action}"
-    
+   
     if details:
         message += f" - {details}"
-    
+   
     logger.info(message)
     print(f"[{timestamp}] {message}")
 
@@ -109,7 +109,7 @@ def startup_sequence(conditional_dew_heater=True):
     Args:
         conditional_dew_heater: Only activate dew heater if conditions require it
     """
-    print("🚀 Starting ObsyBox Observatory Equipment")
+    print(f"Starting ObsyBox Observatory Equipment")
     print("=" * 50)
     
     controller = get_controller()
@@ -146,14 +146,14 @@ def startup_sequence(conditional_dew_heater=True):
                 continue
             
             # Power on the equipment
-            print(f"🔌 Powering on {name}...")
+            print(f"Powering on {name}...")
             
             if controller.set_switch(switch_id, True):
                 log_action(f"Powered on {name}")
                 success_count += 1
                 
                 if delay > 0:
-                    print(f"   ⏱️  Waiting {delay} seconds for {name} to initialize...")
+                    print(f"    Waiting {delay} seconds for {name} to initialize...")
                     time.sleep(delay)
             else:
                 log_action(f"Failed to power on {name}", False)
@@ -163,13 +163,13 @@ def startup_sequence(conditional_dew_heater=True):
         final_status = controller.get_all_switches()
         active_count = sum(1 for state in final_status.values() if state)
         
-        print(f"\n🎯 Startup Summary:")
-        print(f"   ✅ {success_count} devices powered on successfully")
-        print(f"   📊 {active_count} total devices active")
+        print(f"\nStartup Summary:")
+        print(f"   {success_count} devices powered on successfully")
+        print(f"   {active_count} total devices active")
         
         if success_count > 0:
             log_action(f"Observatory startup complete ({success_count} devices)")
-            print("🌟 Observatory ready for observations!")
+            print(f"Observatory ready for observations!")
             return True
         else:
             log_action("Observatory startup failed", False)
@@ -186,7 +186,7 @@ def shutdown_sequence():
     """
     Safely power down all equipment
     """
-    print("🛑 Shutting Down ObsyBox Observatory Equipment")
+    print(f"Shutting Down ObsyBox Observatory Equipment")
     print("=" * 50)
     
     controller = get_controller()
@@ -204,17 +204,17 @@ def shutdown_sequence():
         
         if not active_devices:
             log_action("All equipment already powered off")
-            print("💤 All equipment already powered off")
+            print(f"All equipment already powered off")
             return True
         
-        print(f"🔋 Active devices: {', '.join([name.split('(')[1].rstrip(')') for name in active_devices])}")
+        print(f"Active devices: {', '.join([name.split('(')[1].rstrip(')') for name in active_devices])}")
         
         # Emergency stop - turn everything off
-        print("⚡ Emergency stop - powering off all equipment...")
+        print(f"Emergency stop - powering off all equipment...")
         
         if controller.emergency_stop():
             log_action("Emergency stop executed - all equipment powered off")
-            print("✅ All equipment safely powered off")
+            print(f"All equipment safely powered off")
             
             # Wait a moment for relays to settle
             time.sleep(2)
@@ -224,7 +224,7 @@ def shutdown_sequence():
             still_active = sum(1 for state in final_status.values() if state)
             
             if still_active == 0:
-                print("🌙 Observatory shutdown complete")
+                print(f"Observatory shutdown complete")
                 return True
             else:
                 log_action(f"Shutdown verification failed - {still_active} devices still active", False)
@@ -242,7 +242,7 @@ def shutdown_sequence():
 
 def show_status():
     """Display current equipment status"""
-    print("📊 ObsyBox Equipment Status")
+    print(f"ObsyBox Equipment Status")
     print("=" * 40)
     
     controller = get_controller()
@@ -255,34 +255,34 @@ def show_status():
         all_switches = controller.get_all_switches()
         
         if device_info:
-            print(f"📱 Device: {device_info.device_name}")
-            print(f"💾 Firmware: {device_info.firmware}")
-            print(f"⏱️  Uptime: {device_info.uptime / 1000:.1f} seconds")
-            print(f"🧠 Free RAM: {device_info.free_memory} bytes")
+            print(f"Device: {device_info.device_name}")
+            print(f"Firmware: {device_info.firmware}")
+            print(f"Uptime: {device_info.uptime / 1000:.1f} seconds")
+            print(f"Free RAM: {device_info.free_memory} bytes")
             print()
         
-        print("🔌 Equipment Status:")
+        print(f"Equipment Status:")
         active_count = 0
         
         for switch_id in sorted(EQUIPMENT_CONFIG.keys()):
             config = EQUIPMENT_CONFIG[switch_id]
             state = all_switches.get(switch_id, False)
-            status_icon = "🟢" if state else "🔴"
+            status_icon = "" if state else ""
             status_text = "ON " if state else "OFF"
-            
-            print(f"   {status_icon} Switch {switch_id} ({config['name']}): {status_text}")
+           
+            print(f"  {status_icon} Switch {switch_id} ({config['name']}): {status_text}")
             
             if state:
                 active_count += 1
         
-        print(f"\n📈 Summary: {active_count}/{len(EQUIPMENT_CONFIG)} devices powered on")
+        print(f"\nSummary: {active_count}/{len(EQUIPMENT_CONFIG)} devices powered on")
         
         if active_count == 0:
-            print("💤 Observatory in standby mode")
+            print(f"Observatory in standby mode")
         elif active_count == len(EQUIPMENT_CONFIG):
-            print("🌟 Observatory fully operational")
+            print(f"Observatory fully operational")
         else:
-            print("⚠️  Partial power state - check equipment")
+            print(f"Partial power state - check equipment")
         
         return True
         
@@ -296,12 +296,12 @@ def show_status():
 def toggle_switch(switch_id):
     """Toggle a specific switch"""
     if switch_id not in EQUIPMENT_CONFIG:
-        print(f"❌ Invalid switch ID: {switch_id}")
+        print(f"Invalid switch ID: {switch_id}")
         print(f"Valid switches: {list(EQUIPMENT_CONFIG.keys())}")
         return False
     
     config = EQUIPMENT_CONFIG[switch_id]
-    print(f"🔄 Toggling {config['name']} (Switch {switch_id})")
+    print(f"Toggling {config['name']} (Switch {switch_id})")
     
     controller = get_controller()
     if not controller:
@@ -314,7 +314,7 @@ def toggle_switch(switch_id):
             new_state = controller.get_switch(switch_id)
             action = "ON" if new_state else "OFF"
             log_action(f"Toggled {config['name']} to {action}")
-            print(f"✅ {config['name']} is now {action}")
+            print(f"{config['name']} is now {action}")
             return True
         else:
             log_action(f"Failed to toggle {config['name']}", False)
@@ -358,23 +358,23 @@ def check_dew_heater_conditions():
 
 def interactive_mode():
     """Interactive control mode"""
-    print("🎮 ObsyBox Interactive Control Mode")
+    print(f"ObsyBox Interactive Control Mode")
     print("=" * 40)
     
     while True:
         print("\nCommands:")
-        print("  1) Show status")
-        print("  2) Startup sequence")
-        print("  3) Shutdown sequence")
-        print("  4) Toggle switch")
-        print("  5) Emergency stop")
-        print("  q) Quit")
+        print(f" 1) Show status")
+        print(f" 2) Startup sequence")
+        print(f" 3) Shutdown sequence")
+        print(f" 4) Toggle switch")
+        print(f" 5) Emergency stop")
+        print(f" q) Quit")
         
         try:
             choice = input("\nEnter choice: ").strip().lower()
             
             if choice == 'q':
-                print("👋 Goodbye!")
+                print(f"Goodbye!")
                 break
             elif choice == '1':
                 show_status()
@@ -385,24 +385,24 @@ def interactive_mode():
             elif choice == '4':
                 print("\nAvailable switches:")
                 for switch_id, config in EQUIPMENT_CONFIG.items():
-                    print(f"  {switch_id}) {config['name']}")
+                    print(f" {switch_id}) {config['name']}")
                 
                 try:
                     switch_id = int(input("Enter switch ID: "))
                     toggle_switch(switch_id)
                 except ValueError:
-                    print("❌ Invalid switch ID")
+                    print(f"Invalid switch ID")
             elif choice == '5':
-                if input("⚠️  Confirm emergency stop (y/N): ").lower() == 'y':
+                if input("  Confirm emergency stop (y/N): ").lower() == 'y':
                     shutdown_sequence()
             else:
-                print("❌ Invalid choice")
+                print(f"Invalid choice")
                 
         except KeyboardInterrupt:
-            print("\n👋 Goodbye!")
+            print("\nGoodbye!")
             break
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"Error: {e}")
 
 def main():
     """Main entry point"""
@@ -411,14 +411,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python nina_serial_integration.py startup     # Power on sequence
-  python nina_serial_integration.py shutdown    # Power off all
-  python nina_serial_integration.py status      # Show current status
-  python nina_serial_integration.py toggle 0    # Toggle mount
-  python nina_serial_integration.py             # Interactive mode
+    python nina_serial_integration.py startup     # Power on sequence
+    python nina_serial_integration.py shutdown    # Power off all
+    python nina_serial_integration.py status      # Show current status
+    python nina_serial_integration.py toggle 0    # Toggle mount
+    python nina_serial_integration.py             # Interactive mode
 
 NINA Integration:
-  Add as External Script with arguments: startup or shutdown
+    Add as External Script with arguments: startup or shutdown
         """
     )
     
@@ -460,7 +460,7 @@ NINA Integration:
         success = show_status()
     elif args.command == 'toggle':
         if args.switch_id is None:
-            print("❌ Toggle command requires switch ID")
+            print(f"Toggle command requires switch ID")
             print("Usage: python nina_serial_integration.py toggle <switch_id>")
             print(f"Valid switch IDs: {list(EQUIPMENT_CONFIG.keys())}")
         else:
