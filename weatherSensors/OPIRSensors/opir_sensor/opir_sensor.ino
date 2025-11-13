@@ -39,6 +39,11 @@ bool tslSensorOk = false;
 bool mlxSensorOk = false;
 bool ahtSensorOk = false;
 
+// TSL2591 adaptive gain variables
+tsl2591Gain_t currentGain = TSL2591_GAIN_MED;
+unsigned long lastGainCheck = 0;
+const unsigned long gainCheckInterval = 30000; // Check gain every 30 seconds
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -112,8 +117,10 @@ void setup() {
 
   // Only configure sensors that are present
   if (tslSensorOk) {
-    tsl.setGain(TSL2591_GAIN_MED);
+    currentGain = TSL2591_GAIN_MED;
+    tsl.setGain(currentGain);
     tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
+    Serial.println("TSL2591 initialized with medium gain");
   }
 
   server.begin();
@@ -257,6 +264,59 @@ void serveClient(WiFiClient& client) {
   )rawliteral");
 }
 
+// Adaptive gain control for TSL2591
+void adaptTSLGain() {
+  if (!tslSensorOk) return;
+  
+  // Get current reading with existing gain
+  uint32_t lum = tsl.getFullLuminosity();
+  uint16_t ir = lum >> 16;
+  uint16_t full = lum & 0xFFFF;
+  
+  tsl2591Gain_t newGain = currentGain;
+  
+  // Determine optimal gain based on sensor values
+  // The TSL2591 has 16-bit resolution (0-65535)
+  
+  if (full > 50000) {
+    // Very bright - use lowest gain
+    newGain = TSL2591_GAIN_LOW;
+  } else if (full > 20000) {
+    // Bright - use medium gain  
+    newGain = TSL2591_GAIN_MED;
+  } else if (full > 5000) {
+    // Moderate light - use high gain
+    newGain = TSL2591_GAIN_HIGH;
+  } else {
+    // Low light - use maximum gain
+    newGain = TSL2591_GAIN_MAX;
+  }
+  
+  // Only change gain if it's different from current
+  if (newGain != currentGain) {
+    currentGain = newGain;
+    tsl.setGain(currentGain);
+    
+    // Give sensor time to adjust
+    delay(120); // TSL2591 needs ~120ms to settle after gain change
+    
+    String gainStr;
+    switch (currentGain) {
+      case TSL2591_GAIN_LOW: gainStr = "LOW (1x)"; break;
+      case TSL2591_GAIN_MED: gainStr = "MED (25x)"; break;
+      case TSL2591_GAIN_HIGH: gainStr = "HIGH (428x)"; break;
+      case TSL2591_GAIN_MAX: gainStr = "MAX (9876x)"; break;
+      default: gainStr = "UNKNOWN"; break;
+    }
+    
+    Serial.print("TSL2591 gain adjusted to ");
+    Serial.print(gainStr);
+    Serial.print(" (full spectrum was ");
+    Serial.print(full);
+    Serial.println(")");
+  }
+}
+
 unsigned long lastMqttPublish = 0;
 
 void loop() {
@@ -308,7 +368,8 @@ void loop() {
       tslSensorOk = tsl.begin();
       if (tslSensorOk) {
         Serial.println("TSL2591 sensor reconnected");
-        tsl.setGain(TSL2591_GAIN_MED);
+        currentGain = TSL2591_GAIN_MED;
+        tsl.setGain(currentGain);
         tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
       }
     }
@@ -326,6 +387,12 @@ void loop() {
         Serial.println("AHT10 sensor reconnected");
       }
     }
+  }
+
+  // Adaptive gain control for TSL2591
+  if (millis() - lastGainCheck > gainCheckInterval) {
+    lastGainCheck = millis();
+    adaptTSLGain();
   }
 
   // Handle HTTP requests
@@ -372,8 +439,8 @@ void loop() {
 
     char payload[256];
     snprintf(payload, sizeof(payload),
-      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"ir\":%u,\"full\":%u,\"aht_temp\":%.2f,\"aht_hum\":%.2f}",
-      lux, objTemp, ambTemp, ir, full, ahtTemp, ahtHum);
+      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"ir\":%u,\"full\":%u,\"aht_temp\":%.2f,\"aht_hum\":%.2f,\"tsl_gain\":%d}",
+      lux, objTemp, ambTemp, ir, full, ahtTemp, ahtHum, (int)currentGain);
 
     // Print sensor values to serial
     Serial.println("--- Sensor Reading ---");
@@ -384,6 +451,17 @@ void loop() {
     Serial.print("Full: "); Serial.println(full);
     Serial.print("AHT10 Temp: "); Serial.print(ahtTemp, 2); Serial.println(" °C");
     Serial.print("AHT10 Humidity: "); Serial.print(ahtHum, 2); Serial.println(" %");
+    
+    String gainStr = "N/A";
+    if (tslSensorOk) {
+      switch (currentGain) {
+        case TSL2591_GAIN_LOW: gainStr = "LOW (1x)"; break;
+        case TSL2591_GAIN_MED: gainStr = "MED (25x)"; break;
+        case TSL2591_GAIN_HIGH: gainStr = "HIGH (428x)"; break;
+        case TSL2591_GAIN_MAX: gainStr = "MAX (9876x)"; break;
+      }
+    }
+    Serial.print("TSL Gain: "); Serial.println(gainStr);
     Serial.println("----------------------");
 
     // Only publish if MQTT is connected
