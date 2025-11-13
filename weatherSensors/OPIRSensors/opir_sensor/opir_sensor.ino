@@ -439,8 +439,8 @@ void loop() {
 
     char payload[256];
     snprintf(payload, sizeof(payload),
-      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"ir\":%u,\"full\":%u,\"aht_temp\":%.2f,\"aht_hum\":%.2f,\"tsl_gain\":%d}",
-      lux, objTemp, ambTemp, ir, full, ahtTemp, ahtHum, (int)currentGain);
+      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"aht_temp\":%.2f,\"aht_hum\":%.2f,\"tsl_gain\":%d}",
+      lux, objTemp, ambTemp, ahtTemp, ahtHum, (int)currentGain);
 
     // Print sensor values to serial
     Serial.println("--- Sensor Reading ---");
