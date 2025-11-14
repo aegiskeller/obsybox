@@ -13,10 +13,27 @@ float amin = 0, amax = 1023;    // Anemometer ADC range
 #define DHTPIN 4
 #define DHTTYPE DHT22
 #define ANEMOMETER_PIN A0
+#define DHT_POWER_PIN 5  // Optional: Connect DHT VCC to this pin for power cycling
+
+// Sensor health tracking
+unsigned long lastSuccessfulRead = 0;
+int consecutiveFailures = 0;
+const int MAX_CONSECUTIVE_FAILURES = 5;
 
 #include "arduino_secrets.h"
-const char* ssid = SECRET_SSID;
-const char* password = SECRET_PASS;
+// WiFi credentials - support multiple networks
+struct WiFiNetwork {
+  const char* ssid;
+  const char* password;
+};
+
+WiFiNetwork wifiNetworks[] = {
+  {SECRET_SSID_1, SECRET_PASS_1},
+  {SECRET_SSID_2, SECRET_PASS_2},
+  {SECRET_SSID_3, SECRET_PASS_3}
+};
+const int numNetworks = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
+String connectedSSID = "";
 
 // MQTT settings
 const char* mqtt_server = "192.168.1.49";
@@ -30,6 +47,14 @@ PubSubClient mqttClient(wifiClient);
 IPAddress staticIP(192, 168, 1, 183);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
+
+// AP mode configuration
+const char* ap_ssid = "Wombat-Weather";
+const char* ap_password = "obsybox123";
+IPAddress apIP(192, 168, 4, 1);
+IPAddress apGateway(192, 168, 4, 1);
+IPAddress apSubnet(255, 255, 255, 0);
+bool apMode = false;
 
 DHT dht(DHTPIN, DHTTYPE);
 ESP8266WebServer server(80);
@@ -53,7 +78,7 @@ const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
 
 // Watchdog variables
 Ticker watchdogTicker;
-const int WATCHDOG_TIMEOUT = 30; // seconds
+const int WATCHDOG_TIMEOUT = 60; // seconds
 unsigned long lastWatchdogReset = 0;
 bool watchdogEnabled = false;
 
@@ -68,6 +93,47 @@ void feedWatchdog() {
   if (watchdogEnabled) {
     lastWatchdogReset = millis();
   }
+}
+
+// Robust sensor reading with validation
+bool readDHTWithRetry(float &temp, float &hum, int maxRetries = 3) {
+  for (int attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      delay(2000); // DHT22 needs 2 seconds between reads
+      Serial.print("Retry #");
+      Serial.println(attempt);
+    }
+    
+    temp = dht.readTemperature();
+    hum = dht.readHumidity();
+    
+    // Validate readings - DHT22 ranges: -40 to 80°C, 0-100% RH
+    if (!isnan(temp) && !isnan(hum) && 
+        temp >= -40 && temp <= 80 && 
+        hum >= 0 && hum <= 100) {
+      consecutiveFailures = 0;
+      lastSuccessfulRead = millis();
+      return true;
+    }
+  }
+  
+  consecutiveFailures++;
+  Serial.print("DHT read failed. Consecutive failures: ");
+  Serial.println(consecutiveFailures);
+  
+  // Power cycle DHT if available and too many failures
+  if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+    Serial.println("Too many failures - attempting sensor power cycle");
+    // Uncomment if you wire DHT VCC to DHT_POWER_PIN
+    // digitalWrite(DHT_POWER_PIN, LOW);
+    // delay(1000);
+    // digitalWrite(DHT_POWER_PIN, HIGH);
+    // delay(2000);
+    // dht.begin();
+    consecutiveFailures = 0;
+  }
+  
+  return false;
 }
 
 void reconnectMQTT() {
@@ -85,9 +151,22 @@ void reconnectMQTT() {
 }
 
 void handleRoot() {
-  float temperature = tempHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
-  float humidity = humHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE];
-  float windspeed = lastAvgAnemometer;
+  // Get latest values, or use fallback if NaN
+  float temperature = isnan(lastAvgTemperature) ? 
+    tempHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE] : lastAvgTemperature;
+  float humidity = isnan(lastAvgHumidity) ? 
+    humHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE] : lastAvgHumidity;
+  float windspeed = isnan(lastAvgAnemometer) ? 
+    anemometerHistory[(historyIndex - 1 + HISTORY_SIZE) % HISTORY_SIZE] : lastAvgAnemometer;
+  
+  // If still NaN, show placeholder text
+  String tempStr = isnan(temperature) ? "waiting for data..." : String(temperature, 1);
+  String humStr = isnan(humidity) ? "waiting for data..." : String(humidity, 1);
+  String windStr = isnan(windspeed) ? "waiting for data..." : String(windspeed, 1);
+
+  String modeInfo = apMode ? 
+    "Mode: Access Point (AP)<br>AP SSID: " + String(ap_ssid) + "<br>AP IP: " + apIP.toString() :
+    "Mode: Station (STA)<br>WiFi SSID: " + connectedSSID + "<br>Static IP: " + staticIP.toString();
 
   String html = R"rawliteral(
   <!DOCTYPE html>
@@ -124,16 +203,15 @@ void handleRoot() {
   <body>
     <h1>Wombat Weather Station</h1>
     <h2>Current Readings</h2>
-    <p>Temperature: )rawliteral" + String(temperature, 1) + R"rawliteral(&deg;C</p>
-    <p>Humidity: )rawliteral" + String(humidity, 1) + R"rawliteral( %</p>
-    <p>Wind Speed (ADC): )rawliteral" + String(windspeed, 1) + R"rawliteral(</p>
+    <p>Temperature: )rawliteral" + tempStr + R"rawliteral(&deg;C</p>
+    <p>Humidity: )rawliteral" + humStr + R"rawliteral( %</p>
+    <p>Wind Speed (ADC): )rawliteral" + windStr + R"rawliteral(</p>
     <div class="info">
       <em>
         ESP8266 weather station with DHT22 sensor and anemometer.<br>
         Data sampled every minute, displayed in real-time.<br>
         Last updated: )rawliteral" + String(millis() / 1000) + R"rawliteral( seconds ago.<br>
-        Static IP: )rawliteral" + staticIP.toString() + R"rawliteral(<br>
-        WiFi SSID: )rawliteral" + String(ssid) + R"rawliteral(<br>
+        )rawliteral" + modeInfo + R"rawliteral(<br>
         Firmware: 1.0.0, History: 60 min, 100 samples/min.<br>
         Charts below show the last 60 minutes of data.
       </em>
@@ -184,15 +262,27 @@ void handleRoot() {
 }
 
 void handleTemperature() {
-  server.send(200, "text/plain", String(lastAvgTemperature, 2));
+  if (isnan(lastAvgTemperature)) {
+    server.send(200, "text/plain", "NaN");
+  } else {
+    server.send(200, "text/plain", String(lastAvgTemperature, 2));
+  }
 }
 
 void handleHumidity() {
-  server.send(200, "text/plain", String(lastAvgHumidity, 2));
+  if (isnan(lastAvgHumidity)) {
+    server.send(200, "text/plain", "NaN");
+  } else {
+    server.send(200, "text/plain", String(lastAvgHumidity, 2));
+  }
 }
 
 void handleWindspeed() {
-  server.send(200, "text/plain", String(lastAvgAnemometer, 2));
+  if (isnan(lastAvgAnemometer)) {
+    server.send(200, "text/plain", "NaN");
+  } else {
+    server.send(200, "text/plain", String(lastAvgAnemometer, 2));
+  }
 }
 
 void handleData() {
@@ -221,7 +311,14 @@ void handleData() {
 
 void setup() {
   Serial.begin(115200);
+  
+  // Optional: Set up DHT power pin for power cycling capability
+  // pinMode(DHT_POWER_PIN, OUTPUT);
+  // digitalWrite(DHT_POWER_PIN, HIGH);
+  // delay(2000); // Give sensor time to stabilize
+  
   dht.begin();
+  delay(2000); // DHT22 needs time to stabilize on startup
 
   // Initialize history arrays
   for (int i = 0; i < HISTORY_SIZE; i++) {
@@ -230,30 +327,102 @@ void setup() {
     anemometerHistory[i] = NAN;
   }
 
+  // Scan for available networks and connect to strongest
   WiFi.mode(WIFI_STA);
-  WiFi.config(staticIP, gateway, subnet);
-  WiFi.begin(ssid, password);
-
-  Serial.print("Connecting to WiFi");
-  unsigned long wifiStartTime = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - wifiStartTime > 60000) { // 1 minute timeout
-      Serial.println("\nWiFi connection timeout. Rebooting...");
-      ESP.restart();
+  WiFi.disconnect();
+  delay(100);
+  
+  Serial.println("Scanning for WiFi networks...");
+  int n = WiFi.scanNetworks();
+  
+  int bestNetwork = -1;
+  int bestRSSI = -100;
+  
+  if (n > 0) {
+    Serial.print(n);
+    Serial.println(" networks found");
+    
+    // Check each scanned network against our known networks
+    for (int i = 0; i < n; i++) {
+      String scannedSSID = WiFi.SSID(i);
+      int rssi = WiFi.RSSI(i);
+      
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(scannedSSID);
+      Serial.print(" (");
+      Serial.print(rssi);
+      Serial.println(" dBm)");
+      
+      // Check if this is one of our configured networks
+      for (int j = 0; j < numNetworks; j++) {
+        if (scannedSSID == String(wifiNetworks[j].ssid)) {
+          if (rssi > bestRSSI) {
+            bestRSSI = rssi;
+            bestNetwork = j;
+          }
+        }
+      }
     }
-    delay(500);
-    Serial.print(".");
   }
-  Serial.println("\nWiFi connected. IP address: ");
-  Serial.println(WiFi.localIP());
+  
+  // Try to connect to the best network found
+  if (bestNetwork >= 0) {
+    Serial.print("Connecting to strongest network: ");
+    Serial.print(wifiNetworks[bestNetwork].ssid);
+    Serial.print(" (");
+    Serial.print(bestRSSI);
+    Serial.println(" dBm)");
+    
+    WiFi.config(staticIP, gateway, subnet);
+    WiFi.begin(wifiNetworks[bestNetwork].ssid, wifiNetworks[bestNetwork].password);
+    connectedSSID = String(wifiNetworks[bestNetwork].ssid);
+    
+    unsigned long wifiStartTime = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+      if (millis() - wifiStartTime > 300000) { // 5 minute timeout
+        Serial.println("\nWiFi connection timeout. Starting Access Point mode...");
+        apMode = true;
+        break;
+      }
+      delay(500);
+      Serial.print(".");
+      yield(); // Feed the ESP8266 watchdog
+    }
+  } else {
+    Serial.println("No known networks found. Starting Access Point mode...");
+    apMode = true;
+  }
 
-  // Enable watchdog timer (will reset after WATCHDOG_TIMEOUT seconds without feedWatchdog calls)
+  // Enable watchdog timer BEFORE starting AP/Station mode
   watchdogTicker.attach(WATCHDOG_TIMEOUT, resetModule);
   watchdogEnabled = true;
   lastWatchdogReset = millis();
   Serial.println("Watchdog timer enabled");
 
-  mqttClient.setServer(mqtt_server, mqtt_port); 
+  if (apMode) {
+    // Start AP mode
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(apIP, apGateway, apSubnet);
+    WiFi.softAP(ap_ssid, ap_password);
+    Serial.println("\nAccess Point started");
+    Serial.print("AP SSID: ");
+    Serial.println(ap_ssid);
+    Serial.print("AP Password: ");
+    Serial.println(ap_password);
+    Serial.print("AP IP address: ");
+    Serial.println(WiFi.softAPIP());
+    feedWatchdog(); // Feed watchdog after AP setup
+  } else {
+    Serial.println("\nWiFi connected in Station mode");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    
+    // Only connect to MQTT if in Station mode
+    mqttClient.setServer(mqtt_server, mqtt_port);
+    feedWatchdog(); // Feed watchdog after network setup
+  }
+
   server.on("/", handleRoot);
   server.on("/temperature", handleTemperature);
   server.on("/humidity", handleHumidity);
@@ -269,22 +438,24 @@ void loop() {
 
   server.handleClient();
 
-  // Non-blocking MQTT reconnection
-  if (!mqttClient.connected()) {
-    unsigned long now = millis();
-    if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
-      lastMqttReconnectAttempt = now;
-      Serial.print("Attempting MQTT connection...");
-      if (mqttClient.connect("Anemometer_ESP8266")) {
-        Serial.println("connected");
-      } else {
-        Serial.print("failed, rc=");
-        Serial.print(mqttClient.state());
-        Serial.println(" will try again in 5 seconds");
+  // Non-blocking MQTT reconnection (only in Station mode)
+  if (!apMode) {
+    if (!mqttClient.connected()) {
+      unsigned long now = millis();
+      if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
+        lastMqttReconnectAttempt = now;
+        Serial.print("Attempting MQTT connection...");
+        if (mqttClient.connect("Anemometer_ESP8266")) {
+          Serial.println("connected");
+        } else {
+          Serial.print("failed, rc=");
+          Serial.print(mqttClient.state());
+          Serial.println(" will try again in 5 seconds");
+        }
       }
     }
+    mqttClient.loop();
   }
-  mqttClient.loop();
 
   // Rest of the loop code is unchanged
   static unsigned long lastSampleTime = 0;
@@ -303,15 +474,18 @@ void loop() {
   // --- Print sensor values every 10 seconds for debugging ---
   static unsigned long lastDebugPrint = 0;
   if (now - lastDebugPrint >= 10000 || lastDebugPrint == 0) {
-    float h = dht.readHumidity();
-    float t = dht.readTemperature();
+    float h, t;
+    bool success = readDHTWithRetry(t, h, 2);
     int a = analogRead(ANEMOMETER_PIN);
     Serial.print("[DEBUG] Raw Sensor Readings - Temp: ");
-    Serial.print(t);
+    Serial.print(success ? String(t, 2) : "NaN");
     Serial.print(" °C, Humidity: ");
-    Serial.print(h);
+    Serial.print(success ? String(h, 2) : "NaN");
     Serial.print(" %, Anemometer ADC: ");
-    Serial.println(a);
+    Serial.print(a);
+    Serial.print(" [Status: ");
+    Serial.print(success ? "OK" : "FAIL");
+    Serial.println("]");
     lastDebugPrint = now;
   }
 
@@ -326,16 +500,20 @@ void loop() {
     lastSampleInterval = 0;
   }
 
-  // Take samples every 500ms until NUM_SAMPLES is reached
-  if (sampleCount < NUM_SAMPLES && (now - lastSampleInterval >= 500) && (sampleStartTime != 0)) {
-    float h = dht.readHumidity();
-    float t = dht.readTemperature();
+  // Take samples every 600ms until NUM_SAMPLES is reached (DHT22 needs 2s between reads)
+  if (sampleCount < NUM_SAMPLES && (now - lastSampleInterval >= 2100) && (sampleStartTime != 0)) {
+    float h, t;
     int a = analogRead(ANEMOMETER_PIN);
-    if (!isnan(h) && !isnan(t)) {
+    
+    // Use retry logic but only 1 retry during sampling to not block too long
+    if (readDHTWithRetry(t, h, 1)) {
       humiditySum += h;
       temperatureSum += t;
       anemometerSum += a;
       validSamples++;
+    } else {
+      // Still count the attempt, just don't add to sum
+      Serial.println("[WARN] Skipping invalid sample");
     }
     sampleCount++;
     lastSampleInterval = now;
@@ -347,29 +525,51 @@ void loop() {
     float avgTemperature = validSamples > 0 ? temperatureSum / validSamples : NAN;
     float avgAnemometer = validSamples > 0 ? (float)anemometerSum / validSamples : NAN;
 
-    tempHistory[historyIndex] = avgTemperature;
-    humHistory[historyIndex] = avgHumidity;
-    anemometerHistory[historyIndex] = avgAnemometer; 
-    historyIndex = (historyIndex + 1) % HISTORY_SIZE;
+    // Only store if we got at least 50% valid samples
+    if (validSamples >= NUM_SAMPLES / 2) {
+      tempHistory[historyIndex] = avgTemperature;
+      humHistory[historyIndex] = avgHumidity;
+      anemometerHistory[historyIndex] = avgAnemometer; 
+      historyIndex = (historyIndex + 1) % HISTORY_SIZE;
 
-    // Store latest averages for API endpoints
-    lastAvgTemperature = avgTemperature;
-    lastAvgHumidity = avgHumidity;
-    lastAvgAnemometer = avgAnemometer;
+      // Store latest averages for API endpoints
+      lastAvgTemperature = avgTemperature;
+      lastAvgHumidity = avgHumidity;
+      lastAvgAnemometer = avgAnemometer;
+    } else {
+      Serial.print("[WARN] Insufficient valid samples (");
+      Serial.print(validSamples);
+      Serial.print("/");
+      Serial.print(NUM_SAMPLES);
+      Serial.println("), keeping previous values");
+    }
 
-    Serial.print("Temperature: ");
-    Serial.print(avgTemperature);
+    Serial.print("[SAMPLE] Temperature: ");
+    Serial.print(isnan(avgTemperature) ? "NaN" : String(avgTemperature, 2));
     Serial.print(" °C, Humidity: ");
-    Serial.print(avgHumidity);
+    Serial.print(isnan(avgHumidity) ? "NaN" : String(avgHumidity, 2));
     Serial.print(" %, Anemometer ADC: ");
-    Serial.println(avgAnemometer);
+    Serial.print(isnan(avgAnemometer) ? "NaN" : String(avgAnemometer, 2));
+    Serial.print(" [Valid: ");
+    Serial.print(validSamples);
+    Serial.print("/");
+    Serial.print(NUM_SAMPLES);
+    Serial.println("]");
 
-    // --- MQTT publish every minute (after averaging) ---
-    char payload[128];
-    snprintf(payload, sizeof(payload),
-      "{\"t\":%.2f,\"h\":%.2f,\"ws\":%.2f}",
-      avgTemperature, avgHumidity, avgAnemometer);
-    mqttClient.publish(mqtt_topic, payload);
+    // --- MQTT publish every minute (after averaging) - only in Station mode ---
+    if (!apMode && mqttClient.connected() && validSamples >= NUM_SAMPLES / 2) {
+      if (!isnan(avgTemperature) && !isnan(avgHumidity) && !isnan(avgAnemometer)) {
+        char payload[128];
+        snprintf(payload, sizeof(payload),
+          "{\"t\":%.2f,\"h\":%.2f,\"ws\":%.2f}",
+          avgTemperature, avgHumidity, avgAnemometer);
+        bool published = mqttClient.publish(mqtt_topic, payload);
+        Serial.print("MQTT publish: ");
+        Serial.println(published ? "SUCCESS" : "FAILED");
+      } else {
+        Serial.println("[WARN] Skipping MQTT publish - invalid data");
+      }
+    }
 
     lastSampleTime = now;
     sampleStartTime = 0;
