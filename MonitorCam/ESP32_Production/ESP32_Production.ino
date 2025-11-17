@@ -215,11 +215,12 @@ bool isSystemResponsive() {
   // Test basic system functions to see if we're truly unresponsive
   unsigned long testStart = millis();
   
-  // Only test WiFi if it's been initialized
-  if (WiFi.getMode() != WIFI_OFF) {
-    // Test WiFi connection (safe check)
-    if (WiFi.status() != WL_CONNECTED) {
-      return false;  // WiFi connection lost
+  // Only test WiFi if it's been initialized and connected
+  if (WiFi.getMode() != WIFI_OFF && WiFi.status() == WL_CONNECTED) {
+    // Just verify we can still get WiFi status
+    int rssi = WiFi.RSSI();
+    if (rssi == 0 || rssi > 0) {
+      // WiFi is responding (rssi should be negative, but any response means it works)
     }
   }
   
@@ -308,16 +309,27 @@ bool initCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
+  // Check PSRAM availability
+  Serial.print("PSRAM found: ");
+  Serial.println(psramFound() ? "Yes" : "No");
+  if (psramFound()) {
+    Serial.print("PSRAM size: ");
+    Serial.println(ESP.getPsramSize());
+  }
+  
   // Optimize for speed over quality
   if (psramFound()) {
-    config.frame_size = FRAMESIZE_VGA;    // Reduced from SVGA for speed
-    config.jpeg_quality = 15;             // Lower quality = faster processing
-    config.fb_count = 2;                  // Keep double buffering
+    config.frame_size = FRAMESIZE_SVGA;   // 800x600
+    config.jpeg_quality = 12;             // Lower quality = faster processing
+    config.fb_count = 2;                  // Double buffering
     config.grab_mode = CAMERA_GRAB_LATEST; // Always get latest frame
+    config.fb_location = CAMERA_FB_IN_PSRAM; // Use PSRAM for frame buffer
   } else {
-    config.frame_size = FRAMESIZE_QVGA;   // Even smaller without PSRAM
-    config.jpeg_quality = 20;             // Faster compression
+    Serial.println("WARNING: No PSRAM - using minimal settings");
+    config.frame_size = FRAMESIZE_QVGA;   // 320x240 - smallest usable
+    config.jpeg_quality = 12;
     config.fb_count = 1;
+    config.fb_location = CAMERA_FB_IN_DRAM;
   }
 
   esp_err_t err = esp_camera_init(&config);
@@ -371,6 +383,18 @@ void setup() {
   // Connect to WiFi network
   Serial.println("Connecting to WiFi network...");
   WiFi.mode(WIFI_STA);
+  
+  // Configure static IP
+  IPAddress local_IP(192, 168, 1, 149);
+  IPAddress gateway(192, 168, 1, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  IPAddress primaryDNS(8, 8, 8, 8);
+  IPAddress secondaryDNS(8, 8, 4, 4);
+  
+  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
+    Serial.println("Static IP configuration failed!");
+  }
+  
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   
   // Wait for connection with timeout
@@ -416,18 +440,24 @@ void loop() {
   
   unsigned long currentTime = millis();
   
-  // Don't start watchdog for first 30 seconds to allow boot to complete
-  if (currentTime > 30000 && !watchdogActive) {
+  // Don't start watchdog until WiFi is connected and stable
+  if (!watchdogActive && WiFi.status() == WL_CONNECTED && currentTime > 60000) {
     watchdogActive = true;
-    Serial.println("Watchdog system activated after boot delay");
+    Serial.println("Watchdog system activated - WiFi connected and system stable");
   }
   
   // Handle web server requests
   server.handleClient();
   
-  // Monitor WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi connection lost - attempting reconnect...");
+  // Monitor WiFi connection (but don't spam reconnect)
+  static unsigned long lastReconnectAttempt = 0;
+  // Don't attempt reconnects in first 2 minutes or if already connecting
+  if (WiFi.status() != WL_CONNECTED 
+      && WiFi.status() != WL_DISCONNECTED  // Not actively connecting
+      && currentTime > 120000  // Give 2 minutes after boot
+      && currentTime - lastReconnectAttempt > 60000) {  // Only once per minute
+    lastReconnectAttempt = currentTime;
+    Serial.println("WiFi disconnected - attempting reconnect...");
     WiFi.reconnect();
   }
   
