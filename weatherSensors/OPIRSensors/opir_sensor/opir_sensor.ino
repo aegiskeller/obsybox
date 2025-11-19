@@ -418,12 +418,25 @@ void loop() {
     
     // Read sensors if available
     if (tslSensorOk) {
-      uint32_t lum = tsl.getFullLuminosity();
-      ir = lum >> 16;
-      full = lum & 0xFFFF;
-      lux = tsl.calculateLux(full, ir);
-      if (isnan(lux)) lux = 0.0;
-    }
+if (tslSensorOk) {
+  uint32_t lum = tsl.getFullLuminosity();
+  ir = lum >> 16;
+  full = lum & 0xFFFF;
+  
+  // Check for saturation (max value is 0xFFFF for full spectrum)
+  if (full >= 0xFFFF || ir >= 0xFFFF) {
+    // Saturated - reduce gain or integration time
+    tsl.setGain(TSL2591_GAIN_LOW);
+    tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
+  } else if (full < 100) {
+    // Too dark - increase sensitivity
+    tsl.setGain(TSL2591_GAIN_HIGH);
+    tsl.setTiming(TSL2591_INTEGRATIONTIME_300MS);
+  }
+  
+  lux = tsl.calculateLux(full, ir);
+  if (isnan(lux)) lux = 0.0;
+}    }
     
     if (mlxSensorOk) {
       objTemp = mlx.readObjectTempC();
