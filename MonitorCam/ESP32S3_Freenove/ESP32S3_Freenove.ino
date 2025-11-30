@@ -315,6 +315,16 @@ bool initCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
+  // Print pin configuration for debugging
+  Serial.println("Camera Pin Configuration:");
+  Serial.printf("  XCLK: %d, PCLK: %d\n", config.pin_xclk, config.pin_pclk);
+  Serial.printf("  VSYNC: %d, HREF: %d\n", config.pin_vsync, config.pin_href);
+  Serial.printf("  SDA: %d, SCL: %d\n", config.pin_sscb_sda, config.pin_sscb_scl);
+  Serial.printf("  PWDN: %d, RESET: %d\n", config.pin_pwdn, config.pin_reset);
+  Serial.printf("  Data: Y9=%d Y8=%d Y7=%d Y6=%d Y5=%d Y4=%d Y3=%d Y2=%d\n",
+                Y9_GPIO_NUM, Y8_GPIO_NUM, Y7_GPIO_NUM, Y6_GPIO_NUM,
+                Y5_GPIO_NUM, Y4_GPIO_NUM, Y3_GPIO_NUM, Y2_GPIO_NUM);
+
   // Check PSRAM availability - ESP32-S3 typically has 2MB or 8MB PSRAM
   Serial.print("Checking PSRAM... ");
   Serial.println(psramFound() ? "Found" : "Not Found");
@@ -345,18 +355,68 @@ bool initCamera() {
   }
 
   Serial.println("Initializing camera driver...");
+  Serial.println("Attempting to detect camera sensor...");
+  
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("ERROR: Camera init failed with error 0x%x\n", err);
-    Serial.println("Check camera connections and pin definitions");
+    Serial.printf("\n!!! ERROR: Camera init failed with error 0x%x !!!\n\n", err);
+    
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+      Serial.println("Camera sensor NOT DETECTED or NOT SUPPORTED");
+      Serial.println("\nTroubleshooting steps:");
+      Serial.println("1. Check camera module is properly connected");
+      Serial.println("2. Verify ribbon cable is fully inserted (contacts facing correct way)");
+      Serial.println("3. Check for bent pins on camera connector");
+      Serial.println("4. Measure voltage on camera power pins (should be 3.3V)");
+      Serial.println("5. Try different camera modules (OV2640, OV3660, OV5640)");
+      Serial.println("\nSupported camera sensors:");
+      Serial.println("  - OV2640 (most common)");
+      Serial.println("  - OV3660");
+      Serial.println("  - OV5640");
+      Serial.println("  - OV7670 (rarely used)");
+      Serial.println("\nPin assignments in use:");
+      Serial.printf("  I2C: SDA=%d, SCL=%d (for sensor detection)\n", 
+                    config.pin_sscb_sda, config.pin_sscb_scl);
+    } else if (err == ESP_ERR_NOT_FOUND) {
+      Serial.println("Camera sensor not found on I2C bus");
+      Serial.println("Check I2C connections (SDA/SCL pins)");
+    } else if (err == ESP_ERR_TIMEOUT) {
+      Serial.println("Camera initialization timeout");
+      Serial.println("Check XCLK and power supply");
+    }
+    
+    Serial.println("\n=== Camera Initialization FAILED ===\n");
     return false;
   }
   Serial.println("Camera driver initialized successfully");
 
-  // Optimize sensor settings for good quality with reasonable speed
-  Serial.println("Configuring camera sensor...");
+  // Try to identify the sensor
   sensor_t *s = esp_camera_sensor_get();
   if (s) {
+    Serial.println("\n=== Camera Sensor Detected ===");
+    Serial.printf("Sensor ID: 0x%02X\n", s->id.PID);
+    
+    // Identify sensor model
+    const char* sensorName = "Unknown";
+    switch(s->id.PID) {
+      case OV2640_PID: sensorName = "OV2640"; break;
+      case OV3660_PID: sensorName = "OV3660"; break;
+      case OV5640_PID: sensorName = "OV5640"; break;
+      case OV7670_PID: sensorName = "OV7670"; break;
+      case OV7725_PID: sensorName = "OV7725"; break;
+      case NT99141_PID: sensorName = "NT99141"; break;
+      case GC2145_PID: sensorName = "GC2145"; break;
+      case GC032A_PID: sensorName = "GC032A"; break;
+      case GC0308_PID: sensorName = "GC0308"; break;
+      case BF3005_PID: sensorName = "BF3005"; break;
+      case BF20A6_PID: sensorName = "BF20A6"; break;
+      case SC030IOT_PID: sensorName = "SC030IOT"; break;
+    }
+    Serial.printf("Sensor Model: %s\n", sensorName);
+    Serial.println("===============================\n");
+    
+    // Optimize sensor settings for good quality with reasonable speed
+    Serial.println("Configuring camera sensor...");
     s->set_brightness(s, 0);
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);

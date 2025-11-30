@@ -254,6 +254,51 @@ class TargetSelectorGUI:
             # Silently fail if logo can't be loaded
             pass
         
+        # Telescope selection card
+        telescope_card = tk.Frame(scrollable_frame, bg=COLORS['bg_medium'], relief='ridge', bd=2)
+        telescope_card.pack(fill='x', pady=10, padx=5)
+        
+        telescope_title = tk.Label(
+            telescope_card,
+            text="🔭 Telescope",
+            font=('Helvetica', 11, 'bold'),
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            anchor='w'
+        )
+        telescope_title.pack(fill='x', padx=10, pady=(10, 5))
+        
+        telescope_frame = tk.Frame(telescope_card, bg=COLORS['bg_medium'])
+        telescope_frame.pack(fill='x', padx=10, pady=(0, 10))
+        
+        self.telescope_var = tk.StringVar(value="SCT")
+        
+        tk.Radiobutton(
+            telescope_frame,
+            text="SCT",
+            variable=self.telescope_var,
+            value="SCT",
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            selectcolor=COLORS['bg_light'],
+            activebackground=COLORS['bg_medium'],
+            activeforeground=COLORS['text'],
+            font=('Helvetica', 10)
+        ).pack(side='left', padx=(0, 20))
+        
+        tk.Radiobutton(
+            telescope_frame,
+            text="S50",
+            variable=self.telescope_var,
+            value="S50",
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            selectcolor=COLORS['bg_light'],
+            activebackground=COLORS['bg_medium'],
+            activeforeground=COLORS['text'],
+            font=('Helvetica', 10)
+        ).pack(side='left')
+        
         # Location settings card
         self.create_card(scrollable_frame, "📍 Observer Location", [
             ("Latitude (°)", "latitude", LATITUDE, "Decimal degrees (-90 to 90)"),
@@ -1364,8 +1409,9 @@ class TargetSelectorGUI:
             self.log_message(f"Recording {len(self.selected_targets)} targets in database for {self.observation_date}...", 'info')
             
             try:
-                record_scheduled_targets(self.selected_targets, self.observation_date)
-                self.log_message(f"Recorded targets in database", 'success')
+                telescope = self.telescope_var.get()
+                record_scheduled_targets(self.selected_targets, self.observation_date, telescope=telescope)
+                self.log_message(f"Recorded targets in database (telescope: {telescope})", 'success')
             except Exception as e:
                 self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
                 # Continue with export even if database recording fails
