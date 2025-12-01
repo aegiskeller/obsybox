@@ -4,9 +4,9 @@
 #include "arduino_secrets.h"
 
 // ===================
-// Select camera model
+// Select camera model - Freenove ESP32-S3 WROOM
 // ===================
-#define CAMERA_MODEL_AI_THINKER // Has PSRAM
+#define CAMERA_MODEL_FREENOVE_ESP32S3_WROOM
 #include "camera_pins.h"
 
 // Watchdog and health monitoring
@@ -14,8 +14,9 @@
 unsigned long lastActivity = 0;
 unsigned long bootTime = 0;
 
-// LED control
-#define LED_PIN 4  // GPIO 4 is the flash LED on AI Thinker ESP32-CAM
+// LED control - GPIO 48 for camera flash LED (PWM controlled)
+#define LED_PIN 4
+#define LED_CHANNEL 15  // Use LEDC channel 15 (channel 0 is used by camera)
 bool ledState = false;
 
 // Health monitoring
@@ -29,7 +30,7 @@ bool cameraReady = false;
 
 void handleRoot() {
   String html = "<!DOCTYPE html><html>";
-  html += "<head><title>ObsyBox Monitor Camera</title>";
+  html += "<head><title>ObsyBox Monitor Camera (ESP32-S3)</title>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
   html += "<style>";
   html += "body{font-family:'Courier New',monospace;margin:0;background:#000000;color:#00ff00;}";
@@ -45,7 +46,8 @@ void handleRoot() {
   html += "</style></head><body>";
   
   html += "<div class='container'>";
-  html += "<h1>ObsyBox Monitor Camera</h1>";
+  html += "<h1>ObsyBox Monitor Camera #2</h1>";
+  html += "<div class='status'>Hardware: ESP32-S3 Freenove WROOM</div>";
   
   if (cameraReady) {
     html += "<div class='status'>Camera Status: Ready</div>";
@@ -69,6 +71,7 @@ void handleRoot() {
   html += "IP: " + WiFi.localIP().toString() + "<br>";
   html += "Signal: " + String(WiFi.RSSI()) + " dBm<br>";
   html += "Free Heap: " + String(ESP.getFreeHeap()) + " bytes<br>";
+  html += "PSRAM Free: " + String(ESP.getFreePsram()) + " bytes<br>";
   html += "Uptime: " + String(millis()/1000) + " seconds";
   html += "</div>";
   
@@ -204,8 +207,8 @@ void checkSystemHealth() {
     systemHealthy = true;
   }
   
-  // Check for memory issues
-  if (ESP.getFreeHeap() < 10000) {
+  // Check for memory issues - ESP32-S3 has more RAM than original ESP32
+  if (ESP.getFreeHeap() < 20000) {  // Adjusted threshold for S3
     Serial.println("Low memory detected");
     systemHealthy = false;
   }
@@ -259,6 +262,7 @@ void handleHealth() {
   response += "\"status\":\"" + String(systemHealthy ? "healthy" : "degraded") + "\",";
   response += "\"uptime\":" + String(uptime) + ",";
   response += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
+  response += "\"freePsram\":" + String(ESP.getFreePsram()) + ",";
   response += "\"requestCount\":" + String(requestCount) + ",";
   response += "\"lastActivity\":" + String(lastActivity) + ",";
   response += "\"lastRequest\":" + String(lastRequestTime) + ",";
@@ -279,7 +283,7 @@ void handleLED() {
   checkSystemHealth();
   
   ledState = !ledState;
-  digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+  ledcWrite(LED_PIN, ledState ? 128 : 0);  // 50% brightness when on
   
   String response = ledState ? "ON" : "OFF";
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -287,6 +291,8 @@ void handleLED() {
 }
 
 bool initCamera() {
+  Serial.println("=== Camera Initialization ===");
+  
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -309,92 +315,211 @@ bool initCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  // Check PSRAM availability
-  Serial.print("PSRAM found: ");
-  Serial.println(psramFound() ? "Yes" : "No");
+  // Print pin configuration for debugging
+  Serial.println("Camera Pin Configuration:");
+  Serial.printf("  XCLK: %d, PCLK: %d\n", config.pin_xclk, config.pin_pclk);
+  Serial.printf("  VSYNC: %d, HREF: %d\n", config.pin_vsync, config.pin_href);
+  Serial.printf("  SDA: %d, SCL: %d\n", config.pin_sscb_sda, config.pin_sscb_scl);
+  Serial.printf("  PWDN: %d, RESET: %d\n", config.pin_pwdn, config.pin_reset);
+  Serial.printf("  Data: Y9=%d Y8=%d Y7=%d Y6=%d Y5=%d Y4=%d Y3=%d Y2=%d\n",
+                Y9_GPIO_NUM, Y8_GPIO_NUM, Y7_GPIO_NUM, Y6_GPIO_NUM,
+                Y5_GPIO_NUM, Y4_GPIO_NUM, Y3_GPIO_NUM, Y2_GPIO_NUM);
+
+  // Check PSRAM availability - ESP32-S3 typically has 2MB or 8MB PSRAM
+  Serial.print("Checking PSRAM... ");
+  Serial.println(psramFound() ? "Found" : "Not Found");
   if (psramFound()) {
-    Serial.print("PSRAM size: ");
-    Serial.println(ESP.getPsramSize());
+    Serial.print("  PSRAM size: ");
+    Serial.print(ESP.getPsramSize() / 1024 / 1024);
+    Serial.println(" MB");
+    Serial.print("  Free PSRAM: ");
+    Serial.print(ESP.getFreePsram() / 1024 / 1024);
+    Serial.println(" MB");
   }
   
-  // Optimize for speed over quality
+  // Configure camera based on PSRAM availability
   if (psramFound()) {
-    config.frame_size = FRAMESIZE_SVGA;   // 800x600
-    config.jpeg_quality = 12;             // Lower quality = faster processing
-    config.fb_count = 2;                  // Double buffering
+    Serial.println("Configuring camera with PSRAM...");
+    config.frame_size = FRAMESIZE_UXGA;    // 1600x1200 with PSRAM
+    config.jpeg_quality = 10;              // Better quality
+    config.fb_count = 2;                   // Double buffering
     config.grab_mode = CAMERA_GRAB_LATEST; // Always get latest frame
     config.fb_location = CAMERA_FB_IN_PSRAM; // Use PSRAM for frame buffer
   } else {
-    Serial.println("WARNING: No PSRAM - using minimal settings");
-    config.frame_size = FRAMESIZE_QVGA;   // 320x240 - smallest usable
-    config.jpeg_quality = 12;
-    config.fb_count = 1;
-    config.fb_location = CAMERA_FB_IN_DRAM;
+    Serial.println("No PSRAM detected - using DRAM-only configuration");
+    config.frame_size = FRAMESIZE_SVGA;    // 800x600 without PSRAM
+    config.jpeg_quality = 12;              // Moderate quality
+    config.fb_count = 1;                   // Single buffer to save RAM
+    config.fb_location = CAMERA_FB_IN_DRAM; // Use internal DRAM
+    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // Standard mode
   }
 
+  Serial.println("Initializing camera driver...");
+  Serial.println("Attempting to detect camera sensor...");
+  
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x\n", err);
+    Serial.printf("\n!!! ERROR: Camera init failed with error 0x%x !!!\n\n", err);
+    
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+      Serial.println("Camera sensor NOT DETECTED or NOT SUPPORTED");
+      Serial.println("\nTroubleshooting steps:");
+      Serial.println("1. Check camera module is properly connected");
+      Serial.println("2. Verify ribbon cable is fully inserted (contacts facing correct way)");
+      Serial.println("3. Check for bent pins on camera connector");
+      Serial.println("4. Measure voltage on camera power pins (should be 3.3V)");
+      Serial.println("5. Try different camera modules (OV2640, OV3660, OV5640)");
+      Serial.println("\nSupported camera sensors:");
+      Serial.println("  - OV2640 (most common)");
+      Serial.println("  - OV3660");
+      Serial.println("  - OV5640");
+      Serial.println("  - OV7670 (rarely used)");
+      Serial.println("\nPin assignments in use:");
+      Serial.printf("  I2C: SDA=%d, SCL=%d (for sensor detection)\n", 
+                    config.pin_sscb_sda, config.pin_sscb_scl);
+    } else if (err == ESP_ERR_NOT_FOUND) {
+      Serial.println("Camera sensor not found on I2C bus");
+      Serial.println("Check I2C connections (SDA/SCL pins)");
+    } else if (err == ESP_ERR_TIMEOUT) {
+      Serial.println("Camera initialization timeout");
+      Serial.println("Check XCLK and power supply");
+    }
+    
+    Serial.println("\n=== Camera Initialization FAILED ===\n");
     return false;
   }
+  Serial.println("Camera driver initialized successfully");
 
-  // Optimize sensor settings for speed
+  // Try to identify the sensor
   sensor_t *s = esp_camera_sensor_get();
   if (s) {
+    Serial.println("\n=== Camera Sensor Detected ===");
+    Serial.printf("Sensor ID: 0x%02X\n", s->id.PID);
+    
+    // Identify sensor model
+    const char* sensorName = "Unknown";
+    switch(s->id.PID) {
+      case OV2640_PID: sensorName = "OV2640"; break;
+      case OV3660_PID: sensorName = "OV3660"; break;
+      case OV5640_PID: sensorName = "OV5640"; break;
+      case OV7670_PID: sensorName = "OV7670"; break;
+      case OV7725_PID: sensorName = "OV7725"; break;
+      case NT99141_PID: sensorName = "NT99141"; break;
+      case GC2145_PID: sensorName = "GC2145"; break;
+      case GC032A_PID: sensorName = "GC032A"; break;
+      case GC0308_PID: sensorName = "GC0308"; break;
+      case BF3005_PID: sensorName = "BF3005"; break;
+      case BF20A6_PID: sensorName = "BF20A6"; break;
+      case SC030IOT_PID: sensorName = "SC030IOT"; break;
+    }
+    Serial.printf("Sensor Model: %s\n", sensorName);
+    Serial.println("===============================\n");
+    
+    // Optimize sensor settings for good quality with reasonable speed
+    Serial.println("Configuring camera sensor...");
     s->set_brightness(s, 0);
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);
     
-    // Speed optimizations
-    s->set_gainceiling(s, GAINCEILING_2X);  // Lower gain ceiling = faster
-    s->set_quality(s, 15);                  // Lower quality for speed
-    s->set_framesize(s, FRAMESIZE_VGA);     // Ensure VGA size
+    // Conservative settings for stability
+    s->set_gainceiling(s, GAINCEILING_2X);  // Start conservative
+    s->set_quality(s, 12);                  // Moderate quality
     s->set_colorbar(s, 0);                  // Disable test pattern
     s->set_whitebal(s, 1);                  // Enable auto white balance
     s->set_gain_ctrl(s, 1);                 // Enable auto gain control
     s->set_exposure_ctrl(s, 1);             // Enable auto exposure
     s->set_awb_gain(s, 1);                  // Enable AWB gain
     s->set_agc_gain(s, 0);                  // Start with low gain
+    s->set_aec_value(s, 300);               // Auto exposure value
+    s->set_aec2(s, 0);                      // Disable AEC DSP
+    s->set_dcw(s, 1);                       // Enable downsize
+    s->set_bpc(s, 0);                       // Disable BPC
+    s->set_wpc(s, 1);                       // Enable WPC
+    s->set_raw_gma(s, 1);                   // Enable raw gamma
+    s->set_lenc(s, 1);                      // Enable lens correction
+    s->set_hmirror(s, 0);                   // Disable horizontal mirror
+    s->set_vflip(s, 0);                     // Disable vertical flip
+    Serial.println("Camera sensor configured");
+  } else {
+    Serial.println("WARNING: Could not get sensor handle");
   }
 
+  Serial.println("=== Camera Ready ===\n");
   return true;
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Starting ObsyBox Monitor Camera - Deployment Mode");
+  
+  // ESP32-S3 USB CDC needs time to initialize - just use a fixed delay
+  delay(2000);
+  
+  Serial.println("\n\n=== ObsyBox Monitor Camera - ESP32-S3 Freenove Edition ===");
+  Serial.println("Firmware starting...");
+  
+  // Print chip information
+  Serial.print("Chip Model: ");
+  Serial.println(ESP.getChipModel());
+  Serial.print("Chip Revision: ");
+  Serial.println(ESP.getChipRevision());
+  Serial.print("CPU Frequency: ");
+  Serial.print(ESP.getCpuFreqMHz());
+  Serial.println(" MHz");
+  Serial.print("Flash Size: ");
+  Serial.print(ESP.getFlashChipSize() / 1024 / 1024);
+  Serial.println(" MB");
+  Serial.print("Free Heap: ");
+  Serial.print(ESP.getFreeHeap());
+  Serial.println(" bytes");
+  Serial.print("PSRAM Found: ");
+  Serial.println(psramFound() ? "Yes" : "No");
+  if (psramFound()) {
+    Serial.print("PSRAM Size: ");
+    Serial.print(ESP.getPsramSize() / 1024 / 1024);
+    Serial.println(" MB");
+  }
+  Serial.println();
 
   // Initialize system monitoring
   bootTime = millis();
   lastActivity = bootTime;
   
   // Initialize LED pin
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW); // Start with LED off
+  Serial.println("Initializing flash LED (GPIO 48 with PWM)...");
+  ledcAttach(LED_PIN, 5000, 8);  // 5kHz, 8-bit resolution
+  ledcWrite(LED_PIN, 0);  // Start with LED off
+  Serial.println("Flash LED initialized");
 
   // Initialize camera
+  Serial.println();
   cameraReady = initCamera();
   if (cameraReady) {
-    Serial.println("Camera initialized successfully");
+    Serial.println("✓ Camera initialized successfully\n");
   } else {
-    Serial.println("Camera initialization failed");
+    Serial.println("✗ Camera initialization FAILED\n");
+    Serial.println("Continuing without camera...\n");
   }
 
   // Connect to WiFi network
-  Serial.println("Connecting to WiFi network...");
+  Serial.println("=== WiFi Connection ===");
+  Serial.print("Connecting to: ");
+  Serial.println(SECRET_SSID);
   WiFi.mode(WIFI_STA);
   
-  // Configure static IP
-  IPAddress local_IP(192, 168, 1, 148);
+  // Configure static IP (adjust for your network)
+  IPAddress local_IP(192, 168, 1, 149);  // Change this to your desired IP
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
   IPAddress primaryDNS(8, 8, 8, 8);
   IPAddress secondaryDNS(8, 8, 4, 4);
   
+  Serial.print("Static IP: ");
+  Serial.println(local_IP);
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
-    Serial.println("Static IP configuration failed!");
+    Serial.println("WARNING: Static IP configuration failed!");
   }
   
+  Serial.print("Connecting");
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   
   // Wait for connection with timeout
@@ -405,23 +530,27 @@ void setup() {
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("");
-    Serial.println("WiFi connected successfully!");
+    Serial.println(" Connected!");
+    Serial.println("=== WiFi Status ===");
     Serial.print("Network: ");
     Serial.println(WiFi.SSID());
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+    Serial.print("Gateway: ");
+    Serial.println(WiFi.gatewayIP());
     Serial.print("Signal strength: ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
+    Serial.println();
   } else {
-    Serial.println("");
-    Serial.println("WiFi connection failed!");
+    Serial.println(" FAILED!");
+    Serial.println("WiFi connection timeout");
     Serial.println("Check credentials in arduino_secrets.h");
-    // Continue anyway - might work locally
+    Serial.println("Continuing in offline mode...\n");
   }
 
   // Start web server
+  Serial.println("=== Starting Web Server ===");
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
   server.on("/stream", handleStream);
@@ -429,8 +558,17 @@ void setup() {
   server.on("/health", handleHealth);
   
   server.begin();
-  Serial.println("Web server started");
-  Serial.println("ObsyBox Monitor Camera ready!");
+  Serial.println("Web server started on port 80");
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("  ObsyBox Monitor Camera READY!");
+  Serial.println("========================================");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("Access at: http://");
+    Serial.println(WiFi.localIP());
+  }
+  Serial.println("========================================");
+  Serial.println();
 }
 
 void loop() {
@@ -482,6 +620,7 @@ void loop() {
     // Print system status every 30 seconds
     if (loopCounter % 6 == 0) {
       Serial.println("=== System Status ===");
+      Serial.println("Hardware: ESP32-S3 Freenove WROOM");
       Serial.println("Health: " + String(systemHealthy ? "OK" : "DEGRADED"));
       Serial.println("WiFi: " + String(WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected"));
       if (WiFi.status() == WL_CONNECTED) {
@@ -489,6 +628,7 @@ void loop() {
         Serial.println("IP: " + WiFi.localIP().toString());
       }
       Serial.println("Free Heap: " + String(ESP.getFreeHeap()));
+      Serial.println("Free PSRAM: " + String(ESP.getFreePsram()));
       Serial.println("Uptime: " + String((currentTime - bootTime)/1000) + " seconds");
       Serial.println("Requests: " + String(requestCount));
       if (requestCount > 0) {

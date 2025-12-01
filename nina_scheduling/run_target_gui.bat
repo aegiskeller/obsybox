@@ -6,7 +6,7 @@ REM Updated to handle PowerShell execution issues and provide better error handl
 title NINA Target Selector - Starting...
 
 REM Change to the script directory
-cd /d "C:\Users\aegis\Documents\obsybox\nina_scheduling"
+cd /d "%~dp0"
 
 REM Check if virtual environment exists
 if not exist "venv\Scripts\python.exe" (
@@ -14,10 +14,10 @@ if not exist "venv\Scripts\python.exe" (
     echo ERROR: Virtual environment not found!
     echo.
     echo The virtual environment should be located at:
-    echo   C:\Users\aegis\Documents\obsybox\nina_scheduling\venv\
+    echo   %~dp0venv\
     echo.
     echo To create it, run these commands:
-    echo   cd "C:\Users\aegis\Documents\obsybox\nina_scheduling"
+    echo   cd "%~dp0"
     echo   python -m venv venv
     echo   venv\Scripts\python.exe -m pip install -r requirements.txt
     echo.
@@ -32,7 +32,7 @@ if not exist "target_selector_gui.py" (
     echo ERROR: target_selector_gui.py not found!
     echo.
     echo Please ensure you're running this from the correct directory:
-    echo   C:\Users\aegis\Documents\obsybox\nina_scheduling\
+    echo   %~dp0
     echo.
     echo Press any key to exit...
     pause >nul
@@ -61,7 +61,7 @@ title NINA Target Selector GUI - Running
 
 REM Run the GUI using the virtual environment's Python
 REM Use full path to avoid PowerShell conflicts
-"C:\Users\aegis\Documents\obsybox\nina_scheduling\venv\Scripts\python.exe" "C:\Users\aegis\Documents\obsybox\nina_scheduling\target_selector_gui.py"
+"%~dp0venv\Scripts\python.exe" "%~dp0target_selector_gui.py"
 
 REM Check exit code and handle errors
 if errorlevel 1 (
