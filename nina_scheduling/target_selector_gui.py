@@ -1416,8 +1416,8 @@ class TargetSelectorGUI:
                 self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
                 # Continue with export even if database recording fails
             
-            # Export NINA JSON files
-            export_to_nina_json(self.selected_targets)
+            # Export NINA JSON files with telescope selection
+            export_to_nina_json(self.selected_targets, telescope=telescope)
             
             # Get the output directory for the success message
             today = date.today()

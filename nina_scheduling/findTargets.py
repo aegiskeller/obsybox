@@ -1566,21 +1566,22 @@ def export_to_nina_format(targets: List[Dict], output_path: Path = None):
         json.dump(json_targets, f, indent=2, ensure_ascii=False)
     logger.info(f"Also saved JSON version: {json_path}")
 
-def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_file: str = None, mode: str = "individual"):
+def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_file: str = None, mode: str = "individual", telescope: str = None):
     """
     Export targets to NINA JSON format using a template
     
     Args:
         targets: List of target dictionaries
         output_dir: Directory to save the JSON files (default: NINA VarStars directory with date)
-        template_file: Path to template JSON file (default: NINA_TEMPLATE_FILE config)
+        template_file: Path to template JSON file (default: NINA_TEMPLATE_FILE config, or VarStarS50.template.json for S50)
         mode: Export mode - "individual" for separate files per target, "night_sequence" for single night sequence
+        telescope: Telescope type ('SCT' or 'S50') - determines which template to use if template_file not specified
     
     Returns:
         List of created file paths for individual mode, single file path for night_sequence mode, or None if failed
     """
     if mode == "night_sequence":
-        return export_to_nina_night_sequence(targets, output_dir, template_file)
+        return export_to_nina_night_sequence(targets, output_dir, template_file, telescope=telescope)
     
     # Continue with original individual file export logic
     if output_dir is None:
@@ -1597,7 +1598,13 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     logger.info(f"Created output directory: {output_dir}")
     
     if template_file is None:
-        template_file = NINA_TEMPLATE_FILE
+        # Select template based on telescope type
+        if telescope == "S50":
+            template_file = "VarStarS50.template.json"
+            logger.info(f"Using S50 template for telescope type: {telescope}")
+        else:
+            template_file = NINA_TEMPLATE_FILE
+            logger.info(f"Using default SCT template for telescope type: {telescope}")
     
     # Load template
     template_path = Path(__file__).parent / template_file
@@ -1942,15 +1949,16 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     return created_files  # Return list of created files
 
 
-def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, template_file: str = None, night_template_file: str = None):
+def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, template_file: str = None, night_template_file: str = None, telescope: str = None):
     """
     Export targets to a single NINA night sequence JSON format
     
     Args:
         targets: List of target dictionaries
         output_dir: Directory to save the JSON file (default: NINA VarStars directory with date)
-        template_file: Path to individual target template JSON file (default: NINA_TEMPLATE_FILE config)
+        template_file: Path to individual target template JSON file (default: NINA_TEMPLATE_FILE config, or VarStarS50.template.json for S50)
         night_template_file: Path to night sequence template JSON file (default: night_sequence.template.json)
+        telescope: Telescope type ('SCT' or 'S50') - determines which template to use if template_file not specified
     
     Returns:
         Path to created night sequence file, or None if failed
@@ -1966,7 +1974,13 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
     logger.info(f"Created output directory: {output_dir}")
     
     if template_file is None:
-        template_file = NINA_TEMPLATE_FILE
+        # Select template based on telescope type
+        if telescope == "S50":
+            template_file = "VarStarS50.template.json"
+            logger.info(f"Using S50 template for telescope type: {telescope}")
+        else:
+            template_file = NINA_TEMPLATE_FILE
+            logger.info(f"Using default SCT template for telescope type: {telescope}")
     if night_template_file is None:
         night_template_file = "night_sequence_complex.json"
     
