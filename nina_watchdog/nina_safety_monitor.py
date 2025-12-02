@@ -38,6 +38,7 @@ class NINASafetyMonitor:
         self.shutdown_triggered = False
         self.tracking_stopped = False
         self.dawn_shutdown_triggered = False
+        self.sun_altitude_shutdown_triggered = False
         
     def load_config(self):
         """Load configuration from file"""
@@ -50,7 +51,8 @@ class NINASafetyMonitor:
             "safety_timeouts": {
                 "tracking_stop_minutes": 51,     # Stop tracking after 51 min of inactivity in safe conditions
                 "dawn_shutdown_minutes": 15,     # Park & close dome after 15 min past astronomical dawn
-                "emergency_shutdown_minutes": 15  # Emergency shutdown after 15 min in unsafe conditions
+                "emergency_shutdown_minutes": 15, # Emergency shutdown after 15 min in unsafe conditions
+                "sun_altitude_shutdown_minutes": 5 # Immediate shutdown after 5 min when sun > -12° (civil twilight)
             },
             "check_interval_seconds": 60,  # Check every 60 seconds
             "emergency_shutdown_script": r"C:\Users\aegis\Documents\obsybox\nina_watchdog\emergency_shutdown.py",
@@ -500,6 +502,54 @@ class NINASafetyMonitor:
         except Exception as e:
             logger.error(f"Dawn shutdown failed: {e}")
             
+    def sun_altitude_shutdown(self, sun_altitude, sun_description):
+        """Shutdown due to sun altitude safety violation"""
+        logger.critical(f"SUN ALTITUDE SHUTDOWN - Sun at {sun_description}, dome must close immediately")
+        
+        try:
+            # Send notification first
+            try:
+                from pushover_notifications import send_observatory_alert
+                send_observatory_alert(
+                    config=self.config,
+                    alert_type="emergency",
+                    title="☀️ Sun Altitude Emergency Shutdown",
+                    message=f"Sun altitude {sun_description}. NINA inactive during unsafe solar conditions. Emergency dome closure initiated.",
+                    priority="emergency"
+                )
+            except Exception as e:
+                logger.error(f"Could not send sun altitude shutdown notification: {e}")
+            
+            # Immediate shutdown actions
+            import win32com.client
+            import pythoncom
+            
+            pythoncom.CoInitialize()
+            
+            # Stop telescope tracking immediately
+            try:
+                telescope = win32com.client.Dispatch(self.config["ascom_telescope_driver"])
+                if telescope.Connected:
+                    telescope.Tracking = False
+                    telescope.AbortSlew()
+                    if hasattr(telescope, 'Park'):
+                        telescope.Park()
+                    logger.info("✓ Telescope stopped and parked for sun safety")
+            except Exception as e:
+                logger.error(f"Could not stop telescope: {e}")
+                
+            # Close dome immediately
+            try:
+                dome = win32com.client.Dispatch(self.config["ascom_dome_driver"])
+                if dome.Connected:
+                    dome.CloseShutter()
+                    logger.info("✓ Dome closed for sun altitude safety")
+            except Exception as e:
+                logger.error(f"Could not close dome: {e}")
+                
+        except Exception as e:
+            logger.error(f"Sun altitude shutdown failed: {e}")
+            
     def get_inactive_minutes(self) -> float:
         """Get minutes since last NINA activity"""
         if self.last_nina_activity is None:
@@ -664,11 +714,14 @@ class NINASafetyMonitor:
                 issues.append("Weather conditions unsafe")
                 weather_unsafe = True
                 
-        # Check sun altitude  
+        # Check sun altitude with detailed info
         sun_above_horizon = False
+        sun_altitude = 0.0
+        sun_description = "unknown"
         if self.config["safety_checks"]["check_sun_altitude"]:
-            if not self.check_sun_altitude():
-                issues.append("Sun above horizon")
+            is_safe, sun_altitude, sun_description = self.check_sun_altitude()
+            if not is_safe:
+                issues.append(f"Sun unsafe: {sun_description}")
                 sun_above_horizon = True
         
         # Check astronomical dawn
@@ -680,21 +733,28 @@ class NINASafetyMonitor:
         else:
             logger.info(f"All safety checks passed (Last activity: {inactive_minutes:.1f} min ago)")
         
-        # TIERED SAFETY LOGIC
+        # TIERED SAFETY LOGIC (order matters - most critical first)
         
-        # 1. Emergency shutdown: NINA inactive + unsafe conditions
-        if nina_log_inactive and weather_unsafe and inactive_minutes >= self.config["safety_timeouts"]["emergency_shutdown_minutes"]:
+        # 1. Sun altitude emergency: NINA inactive + sun > -12° (civil twilight or worse)
+        if nina_log_inactive and sun_altitude > -12.0 and inactive_minutes >= self.config["safety_timeouts"]["sun_altitude_shutdown_minutes"]:
+            if not self.sun_altitude_shutdown_triggered:
+                logger.critical(f"SUN ALTITUDE EMERGENCY: NINA inactive {inactive_minutes:.1f} min during {sun_description}")
+                self.sun_altitude_shutdown(sun_altitude, sun_description)
+                self.sun_altitude_shutdown_triggered = True
+        
+        # 2. Emergency shutdown: NINA inactive + unsafe weather conditions
+        elif nina_log_inactive and weather_unsafe and inactive_minutes >= self.config["safety_timeouts"]["emergency_shutdown_minutes"]:
             if not self.shutdown_triggered:
-                logger.critical(f"EMERGENCY: NINA inactive {inactive_minutes:.1f} min + unsafe conditions")
+                logger.critical(f"EMERGENCY: NINA inactive {inactive_minutes:.1f} min + unsafe weather conditions")
                 self.emergency_shutdown()
         
-        # 2. Dawn shutdown: NINA inactive + past astronomical dawn  
-        elif nina_log_inactive and past_astro_dawn and inactive_minutes >= self.config["safety_timeouts"]["dawn_shutdown_minutes"]:
+        # 3. Dawn shutdown: NINA inactive + past astronomical dawn (-18°)
+        elif nina_log_inactive and past_astro_dawn and not sun_above_horizon and inactive_minutes >= self.config["safety_timeouts"]["dawn_shutdown_minutes"]:
             if not self.dawn_shutdown_triggered:
                 logger.warning(f"DAWN SHUTDOWN: NINA inactive {inactive_minutes:.1f} min past astronomical dawn")
                 self.dawn_shutdown()
         
-        # 3. Tracking stop: NINA inactive + safe conditions for 51+ minutes
+        # 4. Tracking stop: NINA inactive + safe conditions for 51+ minutes
         elif nina_log_inactive and not weather_unsafe and not sun_above_horizon and inactive_minutes >= self.config["safety_timeouts"]["tracking_stop_minutes"]:
             if not self.tracking_stopped:
                 logger.info(f"TRACKING STOP: NINA inactive {inactive_minutes:.1f} min in safe conditions")
@@ -702,20 +762,22 @@ class NINASafetyMonitor:
         
         # Reset flags if conditions improve
         if not nina_log_inactive or inactive_minutes < 5:  # Activity resumed
-            if self.tracking_stopped or self.dawn_shutdown_triggered or self.shutdown_triggered:
+            if self.tracking_stopped or self.dawn_shutdown_triggered or self.shutdown_triggered or self.sun_altitude_shutdown_triggered:
                 logger.info("NINA activity resumed - resetting safety flags")
                 self.tracking_stopped = False
                 self.dawn_shutdown_triggered = False
                 self.shutdown_triggered = False
+                self.sun_altitude_shutdown_triggered = False
             
     def run(self):
         """Main monitoring loop"""
         logger.info("Starting NINA Safety Monitor")
         logger.info(f"Monitoring interval: {self.config['check_interval_seconds']} seconds")
         logger.info(f"Tiered Safety Timeouts:")
-        logger.info(f"  • Tracking stop (safe): {self.config['safety_timeouts']['tracking_stop_minutes']} minutes")
+        logger.info(f"  • Sun altitude shutdown: {self.config['safety_timeouts']['sun_altitude_shutdown_minutes']} minutes when sun > -12°")
+        logger.info(f"  • Emergency shutdown (weather): {self.config['safety_timeouts']['emergency_shutdown_minutes']} minutes in unsafe weather")
         logger.info(f"  • Dawn shutdown: {self.config['safety_timeouts']['dawn_shutdown_minutes']} minutes past astronomical dawn")
-        logger.info(f"  • Emergency shutdown (unsafe): {self.config['safety_timeouts']['emergency_shutdown_minutes']} minutes")
+        logger.info(f"  • Tracking stop (safe): {self.config['safety_timeouts']['tracking_stop_minutes']} minutes in safe conditions")
         
         # Log wait detection configuration
         wait_config = self.config.get("wait_detection", {})

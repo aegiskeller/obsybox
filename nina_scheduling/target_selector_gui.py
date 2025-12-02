@@ -1416,13 +1416,27 @@ class TargetSelectorGUI:
                 self.log_message(f"Warning: Could not record to database: {str(e)}", 'warning')
                 # Continue with export even if database recording fails
             
-            # Export NINA JSON files with telescope selection
-            export_to_nina_json(self.selected_targets, telescope=telescope)
+            # Get the configured export path from the GUI entry
+            base_export_path = self.nina_export_base_dir_entry.get().strip()
+            if not base_export_path:
+                base_export_path = str(NINA_EXPORT_BASE_DIR)  # Fallback to default
             
-            # Get the output directory for the success message
+            # Append telescope name if configured
+            telescope = self.telescope_var.get()
+            if telescope and telescope.strip():
+                telescope_suffix = telescope.strip()
+                if telescope_suffix == "S50":
+                    base_export_path = str(Path(base_export_path) / "S50")
+                else:
+                    base_export_path = str(Path(base_export_path) / telescope_suffix)
+            
+            # Create date-based subdirectory
             today = date.today()
             date_str = today.strftime('%Y%m%d')
-            output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+            output_dir = Path(base_export_path) / date_str
+            
+            # Export NINA JSON files with custom path
+            export_to_nina_json(self.selected_targets, output_dir=output_dir)
             
             self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
             messagebox.showinfo(
