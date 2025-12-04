@@ -558,11 +558,17 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
                     continue
         
         # Filter by magnitude
+        # Star's max mag should be > GUI's min mag AND star's min mag should be < GUI's max mag
         try:
             mag_max = float(target.get('mag_max', '0').replace(',', '.'))
             mag_min = float(target.get('mag_min', '0').replace(',', '.'))
             
-            if not (MAG_MIN <= mag_max <= MAG_MAX or MAG_MIN <= mag_min <= MAG_MAX):
+            # Handle invalid magnitude ranges where min is 0 (treat both as mag_max)
+            if mag_min == 0 and mag_max > 0:
+                mag_min = mag_max
+            
+            # Target is valid if: star's max magnitude > GUI min AND star's min magnitude < GUI max
+            if not (mag_max > MAG_MIN and mag_min < MAG_MAX):
                 stats['magnitude_filtered'] += 1
                 passed = False
                 continue
