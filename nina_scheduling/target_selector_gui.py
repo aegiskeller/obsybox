@@ -1435,8 +1435,8 @@ class TargetSelectorGUI:
             date_str = today.strftime('%Y%m%d')
             output_dir = Path(base_export_path) / date_str
             
-            # Export NINA JSON files with custom path
-            export_to_nina_json(self.selected_targets, output_dir=output_dir)
+            # Export NINA JSON files with custom path and telescope selection
+            export_to_nina_json(self.selected_targets, output_dir=output_dir, telescope=telescope)
             
             self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
             messagebox.showinfo(
