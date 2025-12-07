@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include "esp_wifi.h"
 #include "arduino_secrets.h"
 
 // ===================
@@ -13,6 +14,12 @@
 #define WDT_TIMEOUT 30000  // 30 seconds in milliseconds
 unsigned long lastActivity = 0;
 unsigned long bootTime = 0;
+
+// WiFi stability settings for low signal environments
+#define WIFI_MIN_RSSI -80         // Minimum acceptable signal strength (dBm)
+#define WIFI_RECONNECT_DELAY 30000 // Wait 30s between reconnect attempts
+#define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Max TX power for better range
+bool lowSignalMode = false;       // Automatically enable for weak signals
 
 // LED control
 #define LED_PIN 4  // GPIO 4 is the flash LED on AI Thinker ESP32-CAM
@@ -83,7 +90,7 @@ void handleRoot() {
   html += "    streaming = true;";
   html += "    document.getElementById('stream-status').textContent = 'Live streaming active';";
   html += "    refreshStream();";
-  html += "    streamTimer = setInterval(refreshStream, 500);"; // 500ms refresh for faster updates
+    html += "    streamTimer = setInterval(refreshStream, 2000);"; // 2s refresh (reduced from 500ms for weak WiFi)
   html += "  }";
   html += "}";
   html += "function refreshStream() {";
@@ -138,6 +145,14 @@ void handleCapture() {
     return;
   }
   
+  // In low signal mode, reduce quality even further for faster transmission
+  if (lowSignalMode) {
+    sensor_t *s = esp_camera_sensor_get();
+    if (s) {
+      s->set_quality(s, 20);  // Maximum compression for weak signal
+    }
+  }
+  
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     lastCameraError = millis();
@@ -145,6 +160,10 @@ void handleCapture() {
     server.send(500, "text/plain", "Camera capture failed");
     return;
   }
+  
+  Serial.print("Capture: ");
+  Serial.print(fb->len / 1024);
+  Serial.println(" KB");
   
   server.sendHeader("Content-Type", "image/jpeg");
   server.sendHeader("Content-Length", String(fb->len));
@@ -317,17 +336,17 @@ bool initCamera() {
     Serial.println(ESP.getPsramSize());
   }
   
-  // Optimize for speed over quality
+  // Optimize for weak WiFi signal - smaller frames = less transmission time = more stable
   if (psramFound()) {
-    config.frame_size = FRAMESIZE_SVGA;   // 800x600
-    config.jpeg_quality = 12;             // Lower quality = faster processing
-    config.fb_count = 2;                  // Double buffering
+    config.frame_size = FRAMESIZE_VGA;    // 640x480 (reduced from SVGA for stability)
+    config.jpeg_quality = 15;             // Higher value = lower quality = smaller files
+    config.fb_count = 1;                  // Single buffer (reduced from 2 to save power)
     config.grab_mode = CAMERA_GRAB_LATEST; // Always get latest frame
     config.fb_location = CAMERA_FB_IN_PSRAM; // Use PSRAM for frame buffer
   } else {
     Serial.println("WARNING: No PSRAM - using minimal settings");
     config.frame_size = FRAMESIZE_QVGA;   // 320x240 - smallest usable
-    config.jpeg_quality = 12;
+    config.jpeg_quality = 15;
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
@@ -338,23 +357,25 @@ bool initCamera() {
     return false;
   }
 
-  // Optimize sensor settings for speed
+  // Optimize sensor settings for stability in low WiFi signal
   sensor_t *s = esp_camera_sensor_get();
   if (s) {
     s->set_brightness(s, 0);
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);
     
-    // Speed optimizations
+    // Stability optimizations - smaller file size for faster transmission
     s->set_gainceiling(s, GAINCEILING_2X);  // Lower gain ceiling = faster
-    s->set_quality(s, 15);                  // Lower quality for speed
-    s->set_framesize(s, FRAMESIZE_VGA);     // Ensure VGA size
+    s->set_quality(s, 18);                  // Higher value = more compression = smaller files
+    s->set_framesize(s, FRAMESIZE_VGA);     // VGA size (640x480)
     s->set_colorbar(s, 0);                  // Disable test pattern
     s->set_whitebal(s, 1);                  // Enable auto white balance
     s->set_gain_ctrl(s, 1);                 // Enable auto gain control
     s->set_exposure_ctrl(s, 1);             // Enable auto exposure
     s->set_awb_gain(s, 1);                  // Enable AWB gain
     s->set_agc_gain(s, 0);                  // Start with low gain
+    
+    Serial.println("Camera optimized for low WiFi signal (VGA, high compression)");
   }
 
   return true;
@@ -380,12 +401,21 @@ void setup() {
     Serial.println("Camera initialization failed");
   }
 
-  // Connect to WiFi network
+  // Connect to WiFi network with power optimization for low signal
   Serial.println("Connecting to WiFi network...");
   WiFi.mode(WIFI_STA);
   
+  // Set maximum WiFi TX power for better range in low signal areas
+  WiFi.setTxPower(WIFI_TX_POWER);
+  Serial.println("WiFi TX power set to maximum for extended range");
+  
+  // Enable WiFi power saving mode for stability (reduces peak current draw)
+  esp_wifi_set_ps(WIFI_PS_MIN_MODEM);  // Minimum modem sleep
+  Serial.println("WiFi power saving enabled for stability");
+  
   // Configure static IP
-  IPAddress local_IP(192, 168, 1, 148);
+  //IPAddress local_IP(192, 168, 1, 148);
+  IPAddress local_IP(192, 168, 1, 149); // and for unit #2
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
   IPAddress primaryDNS(8, 8, 8, 8);
@@ -411,13 +441,27 @@ void setup() {
     Serial.println(WiFi.SSID());
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+    
+    int rssi = WiFi.RSSI();
     Serial.print("Signal strength: ");
-    Serial.print(WiFi.RSSI());
+    Serial.print(rssi);
     Serial.println(" dBm");
+    
+    // Check if signal is weak and enable low-signal optimizations
+    if (rssi < WIFI_MIN_RSSI) {
+      lowSignalMode = true;
+      Serial.println("WARNING: Weak WiFi signal detected!");
+      Serial.println("Low-signal mode ENABLED: Reduced quality, longer timeouts");
+    } else if (rssi < -70) {
+      Serial.println("NOTICE: Moderate WiFi signal - monitoring for stability");
+    } else {
+      Serial.println("Good WiFi signal strength");
+    }
   } else {
     Serial.println("");
     Serial.println("WiFi connection failed!");
     Serial.println("Check credentials in arduino_secrets.h");
+    lowSignalMode = true;  // Assume low signal if can't connect
     // Continue anyway - might work locally
   }
 
@@ -449,13 +493,35 @@ void loop() {
   // Handle web server requests
   server.handleClient();
   
-  // Monitor WiFi connection (but don't spam reconnect)
+  // Monitor WiFi connection and signal strength
   static unsigned long lastReconnectAttempt = 0;
+  static unsigned long lastSignalCheck = 0;
+  
+  // Check signal strength every 30 seconds and adjust low-signal mode
+  if (WiFi.status() == WL_CONNECTED && currentTime - lastSignalCheck > 30000) {
+    lastSignalCheck = currentTime;
+    int rssi = WiFi.RSSI();
+    
+    if (rssi < WIFI_MIN_RSSI && !lowSignalMode) {
+      lowSignalMode = true;
+      Serial.print("Signal degraded to ");
+      Serial.print(rssi);
+      Serial.println(" dBm - enabling low-signal mode");
+    } else if (rssi > (WIFI_MIN_RSSI + 10) && lowSignalMode) {
+      lowSignalMode = false;
+      Serial.print("Signal improved to ");
+      Serial.print(rssi);
+      Serial.println(" dBm - disabling low-signal mode");
+    }
+  }
+  
   // Don't attempt reconnects in first 2 minutes or if already connecting
+  // In low signal mode, wait longer between reconnect attempts
+  unsigned long reconnectDelay = lowSignalMode ? WIFI_RECONNECT_DELAY : 60000;
   if (WiFi.status() != WL_CONNECTED 
       && WiFi.status() != WL_DISCONNECTED  // Not actively connecting
       && currentTime > 120000  // Give 2 minutes after boot
-      && currentTime - lastReconnectAttempt > 60000) {  // Only once per minute
+      && currentTime - lastReconnectAttempt > reconnectDelay) {
     lastReconnectAttempt = currentTime;
     Serial.println("WiFi disconnected - attempting reconnect...");
     WiFi.reconnect();
