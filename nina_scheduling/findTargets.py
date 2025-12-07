@@ -1765,8 +1765,10 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         mag_max_str = target.get('mag_max', '12.0')
         try:
             mag_max = float(mag_max_str)
-            exposure_time = get_exposure_time(mag_max)
-            logger.info(f"Target {target_name}: mag_max={mag_max}, exposure_time={exposure_time}s")
+            # Use instrument-specific exposure time scaling
+            instrument = telescope if telescope in ['SCT', 'S50'] else 'SCT'
+            exposure_time = get_exposure_time(mag_max, instrument=instrument)
+            logger.info(f"Target {target_name}: mag_max={mag_max}, exposure_time={exposure_time}s (instrument={instrument})")
         except (ValueError, TypeError):
             exposure_time = 40.0  # Default fallback
             logger.warning(f"Could not parse magnitude for {target_name}, using default exposure time {exposure_time}s")
@@ -2161,7 +2163,9 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         mag_max_str = target.get('mag_max', '12.0')
         try:
             mag_max = float(mag_max_str)
-            exposure_time = get_exposure_time(mag_max)
+            # Use instrument-specific exposure time scaling
+            instrument = telescope if telescope in ['SCT', 'S50'] else 'SCT'
+            exposure_time = get_exposure_time(mag_max, instrument=instrument)
         except (ValueError, TypeError):
             exposure_time = 40.0
             

@@ -4,29 +4,43 @@ Exposure time utility
 
 Provides a function to compute recommended exposure time (seconds)
 from a given primary magnitude (mag1) using a small lookup table and
-linear interpolation. The table (mag, exposure) is:
+linear interpolation.
 
-  (9, 5), (9.8, 7), (10.8, 8), (11.5, 30), (14, 140)
+Supports multiple instrument profiles:
+- SCT (default): (9, 5), (9.8, 7), (10.8, 8), (11.5, 30), (14, 140)
+- S50: (8, 3), (8.5, 6), (9, 10), (10, 30), (11, 60)
 
 The function clips to the table range by default to avoid extreme
 extrapolations.
 """
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 try:
     import numpy as np
 except Exception:
     np = None
 
-# Lookup table (mag, exposure_seconds)
-_TABLE: List[Tuple[float, float]] = [
-    (9.0, 5.0),
-    (9.8, 7.0),
-    (10.8, 8.0),
-    (11.5, 30.0),
-    (14.0, 140.0),
-]
+# Lookup tables for different instruments (mag, exposure_seconds)
+_TABLES: Dict[str, List[Tuple[float, float]]] = {
+    'SCT': [
+        (9.0, 5.0),
+        (9.8, 7.0),
+        (10.8, 8.0),
+        (11.5, 30.0),
+        (14.0, 140.0),
+    ],
+    'S50': [
+        (8.0, 3.0),
+        (8.5, 6.0),
+        (9.0, 10.0),
+        (10.0, 30.0),
+        (11.0, 60.0),
+    ],
+}
 
-def get_exposure_time(mag: float, *, method: str = 'linear', clip: bool = True, round_to: float = 1.0) -> float:
+# Default table for backward compatibility
+_TABLE: List[Tuple[float, float]] = _TABLES['SCT']
+
+def get_exposure_time(mag: float, *, method: str = 'linear', clip: bool = True, round_to: float = 1.0, instrument: str = 'SCT') -> float:
     """
     Return an exposure time (seconds) for a given primary magnitude `mag`.
 
@@ -35,12 +49,18 @@ def get_exposure_time(mag: float, *, method: str = 'linear', clip: bool = True, 
         method: currently only 'linear' supported (linear interpolation)
         clip: if True, clip to the table min/max instead of extrapolating
         round_to: round result to this many seconds (use 1.0 for integer seconds)
+        instrument: instrument profile to use ('SCT' or 'S50')
 
     Returns:
         exposure time in seconds (float)
     """
-    mags = [m for m, _ in _TABLE]
-    exps = [e for _, e in _TABLE]
+    # Select the appropriate table for the instrument
+    if instrument not in _TABLES:
+        raise ValueError(f"Unknown instrument '{instrument}'; supported: {list(_TABLES.keys())}")
+    
+    table = _TABLES[instrument]
+    mags = [m for m, _ in table]
+    exps = [e for _, e in table]
 
     if method != 'linear':
         raise ValueError("Unsupported method; only 'linear' is implemented")
