@@ -34,9 +34,9 @@ from exposure_time import get_exposure_time
 
 # Import scheduling database function
 import sys
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "logexploit" / "src"))
 try:
-    from parse_nina_log import mark_targets_scheduled
+    from logexploit.database import mark_targets_scheduled
 except ImportError:
     mark_targets_scheduled = None  # Optional dependency
 

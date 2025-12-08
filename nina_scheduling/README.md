@@ -208,8 +208,9 @@ When you import NINA log files, the system:
 - Marks exposures as scheduled in the log database
 
 ```bash
-# Import a NINA log file
-python parse_nina_log.py path/to/nina-log.log
+# Import a NINA log file using logexploit
+cd ../logexploit
+python -m logexploit path/to/nina-log.log
 ```
 
 The parser will:
@@ -329,7 +330,7 @@ Each generated NINA file includes:
 ### Core Scripts
 - `findTargets.py` - Main script for target selection and NINA file generation
 - `target_selector_gui.py` - Graphical user interface for target selection
-- `parse_nina_log.py` - Parse NINA log files and import to database
+- Use `logexploit` package (in ../logexploit/) - Parse NINA log files and import to database
 - `exposure_time.py` - Exposure time calculation based on magnitude
 - `observation_db.py` - Database utilities and helper functions
 

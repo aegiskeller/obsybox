@@ -1,21 +1,21 @@
 # NINA Log File Tracking
 
-The parse_nina_log.py script now tracks which log files have been imported to help manage multiple log files from the same observing night.
+**Note: This functionality is now provided by the `logexploit` package in `../logexploit/`.**
+
+The logexploit package tracks which log files have been imported to help manage multiple log files from the same observing night.
 
 ## Features
 
 ### 1. Automatic Log File Registration
-Every imported log file is registered in the `nina_log_files` table with:
+Every imported log file is registered in the database with:
 - Log filename and full path
-- Telescope name (auto-detected from profile)
-- Profile ID
-- Observation date
-- First and last exposure times
+- Session start and end times
+- Target count
 - Total exposure count
 - Import timestamp
 
 ### 2. Exposure Tracking
-Each exposure record includes a `log_file` column linking it back to the source log file.
+Each exposure record is linked to its target and session.
 
 ### 3. Duplicate Detection
 When re-importing a log file, the script warns you:
@@ -57,24 +57,25 @@ CREATE TABLE nina_log_exposures (
 
 ### Import Log Files
 ```bash
-# Import with auto-detection
-python parse_nina_log.py --log nina_log1.log --db obs.sqlite --profile-map profile_map.txt
+# Import a NINA log file using logexploit
+cd ../logexploit
+python -m logexploit nina_log.log
 
-# Import multiple files from same night
-python parse_nina_log.py --log nina_log2.log --db obs.sqlite --profile-map profile_map.txt
-python parse_nina_log.py --log nina_log3.log --db obs.sqlite --profile-map profile_map.txt
+# The log will be stored in the database (default: observing_log.db)
+# Subsequent imports of the same file will be detected and skipped
 ```
 
-### Query Imported Log Files
+### Query Imported Sessions
 ```bash
-# List all imported log files
-python query_log_files.py obs.sqlite
+# List all imported sessions (use logexploit's web UI)
+cd ../logexploit
+python -m logexploit --ui
 
-# Filter by observation date
-python query_log_files.py obs.sqlite --date 2025-10-24
+# Or use the CLI to list sessions
+python -m logexploit --list-sessions
 
-# Filter by telescope
-python query_log_files.py obs.sqlite --telescope "SCT 8-inch"
+# Show details for a specific session
+python -m logexploit --show-session 1
 ```
 
 ### SQL Queries
@@ -121,32 +122,33 @@ ORDER BY observation_date DESC;
 
 NINA may create multiple log files during a single observing session (e.g., if NINA is restarted). The tracking system handles this by:
 
-1. Each log file is registered separately
-2. Exposures are linked to their source log file
-3. You can query by observation_date to see all log files from a night
-4. Duplicate exposures (same file path) are automatically skipped
+1. Each log file is registered separately as a session
+2. Exposures are linked to their targets and sessions
+3. You can query by date to see all sessions from a night
+4. Duplicate log files (same file and modification time) are automatically skipped
 
 ## Example Workflow
 
 ```bash
 # Import all log files from October 24, 2025
-for log in 20251024*.log; do
-    python parse_nina_log.py --log "$log" --db observations.sqlite --profile-map profile_map.txt
+cd ../logexploit
+for log in /path/to/logs/20251024*.log; do
+    python -m logexploit "$log"
 done
 
-# Query what was imported
-python query_log_files.py observations.sqlite --date 2025-10-24
+# View imported sessions in web UI
+python -m logexploit --ui
 
-# Output:
-# Found 3 log file(s):
+# Or list sessions via CLI
+python -m logexploit --list-sessions
+
+# Example output:
+# Session 1: nina_log_20251024.log
+#   Date: 2025-10-24 19:29 to 22:15
+#   Targets: 5
+#   Exposures: 150
 # 
-# 📄 20251024-143707.log
-#    Date: 2025-10-24
-#    Time Range: 2025-10-24T19:29:26 to 2025-10-24T22:15:30
-#    Exposures: 150
-# 
-# 📄 20251024-223045.log
-#    Date: 2025-10-24
+# Session 2: nina_log_20251024_part2.log
 #    Time Range: 2025-10-24T22:31:15 to 2025-10-25T02:45:22
 #    Exposures: 180
 # 
