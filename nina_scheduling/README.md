@@ -208,9 +208,14 @@ When you import NINA log files, the system:
 - Marks exposures as scheduled in the log database
 
 ```bash
-# Import a NINA log file using logexploit (uses shared database)
+# Import a NINA log file using logexploit with proper database integration
 cd ../logexploit
-python -m logexploit --db ../nina_scheduling/observations.sqlite path/to/nina-log.log
+python -m logexploit --nina-integration --db ../nina_scheduling/observations.sqlite path/to/nina-log.log
+
+# This creates proper foreign key relationships:
+# - Links exposures to scheduled_targets
+# - Updates observation_nights records
+# - Stores in the observations table (not separate exposures table)
 ```
 
 The parser will:

@@ -54,9 +54,9 @@ pip install -r requirements.txt
 python target_selector_gui.py
 
 # Import observation logs post-session
-# Use logexploit from the logexploit directory with shared database
+# Use logexploit with NINA integration for proper database linking
 cd logexploit
-python -m logexploit --db ..\nina_scheduling\observations.sqlite path\to\nina-log.log
+python -m logexploit --nina-integration --db ..\nina_scheduling\observations.sqlite path\to\nina-log.log
 ```
 
 **Key configuration** in `findTargets.py`:

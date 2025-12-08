@@ -57,14 +57,16 @@ CREATE TABLE nina_log_exposures (
 
 ### Import Log Files
 ```bash
-# Import a NINA log file using logexploit
-# IMPORTANT: Use the shared observations.sqlite database
+# Import a NINA log file with proper schema integration
+# IMPORTANT: Use --nina-integration flag for proper foreign key relationships
 cd ../logexploit
-python -m logexploit --db ../nina_scheduling/observations.sqlite nina_log.log
+python -m logexploit --nina-integration --db ../nina_scheduling/observations.sqlite nina_log.log
 
-# The log will be stored in the shared database
-# This allows mark_targets_scheduled() to link exposures to scheduled targets
-# Subsequent imports of the same file will be detected and skipped
+# The --nina-integration flag ensures:
+# - Exposures are stored in the observations table (linked to scheduled_targets)
+# - Proper foreign keys: observation_nights → targets → scheduled_targets → observations
+# - Duplicate detection on file_path
+# - Automatic linking to pre-scheduled targets when found
 ```
 
 ### Query Imported Sessions
@@ -136,11 +138,23 @@ NINA may create multiple log files during a single observing session (e.g., if N
 cd ../logexploit
 DB_PATH="../nina_scheduling/observations.sqlite"
 for log in /path/to/logs/20251024*.log; do
-    python -m logexploit --db "$DB_PATH" "$log"
+    python -m logexploit --nina-integration --db "$DB_PATH" "$log"
 done
 
-# View imported sessions in web UI
-python -m logexploit --db "$DB_PATH" --ui
+# Query the results using SQL
+sqlite3 "$DB_PATH" <<EOF
+SELECT 
+    t.target_name,
+    st.status,
+    COUNT(o.observation_id) as exposure_count,
+    MIN(o.datetime_start) as first_exposure,
+    MAX(o.datetime_start) as last_exposure
+FROM scheduled_targets st
+JOIN targets t ON st.target_id = t.target_id
+LEFT JOIN observations o ON st.scheduled_target_id = o.scheduled_target_id
+WHERE st.night_id = (SELECT night_id FROM observation_nights WHERE date_obs = '2025-10-24')
+GROUP BY t.target_name, st.status;
+EOF
 
 # Or list sessions via CLI
 python -m logexploit --list-sessions
