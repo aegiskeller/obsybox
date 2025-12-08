@@ -58,24 +58,26 @@ CREATE TABLE nina_log_exposures (
 ### Import Log Files
 ```bash
 # Import a NINA log file using logexploit
+# IMPORTANT: Use the shared observations.sqlite database
 cd ../logexploit
-python -m logexploit nina_log.log
+python -m logexploit --db ../nina_scheduling/observations.sqlite nina_log.log
 
-# The log will be stored in the database (default: observing_log.db)
+# The log will be stored in the shared database
+# This allows mark_targets_scheduled() to link exposures to scheduled targets
 # Subsequent imports of the same file will be detected and skipped
 ```
 
 ### Query Imported Sessions
 ```bash
-# List all imported sessions (use logexploit's web UI)
+# List all imported sessions (use logexploit's web UI with shared database)
 cd ../logexploit
-python -m logexploit --ui
+python -m logexploit --db ../nina_scheduling/observations.sqlite --ui
 
 # Or use the CLI to list sessions
-python -m logexploit --list-sessions
+python -m logexploit --db ../nina_scheduling/observations.sqlite --list-sessions
 
 # Show details for a specific session
-python -m logexploit --show-session 1
+python -m logexploit --db ../nina_scheduling/observations.sqlite --show-session 1
 ```
 
 ### SQL Queries
@@ -132,12 +134,13 @@ NINA may create multiple log files during a single observing session (e.g., if N
 ```bash
 # Import all log files from October 24, 2025
 cd ../logexploit
+DB_PATH="../nina_scheduling/observations.sqlite"
 for log in /path/to/logs/20251024*.log; do
-    python -m logexploit "$log"
+    python -m logexploit --db "$DB_PATH" "$log"
 done
 
 # View imported sessions in web UI
-python -m logexploit --ui
+python -m logexploit --db "$DB_PATH" --ui
 
 # Or list sessions via CLI
 python -m logexploit --list-sessions

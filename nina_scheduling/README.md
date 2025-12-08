@@ -208,9 +208,9 @@ When you import NINA log files, the system:
 - Marks exposures as scheduled in the log database
 
 ```bash
-# Import a NINA log file using logexploit
+# Import a NINA log file using logexploit (uses shared database)
 cd ../logexploit
-python -m logexploit path/to/nina-log.log
+python -m logexploit --db ../nina_scheduling/observations.sqlite path/to/nina-log.log
 ```
 
 The parser will:
