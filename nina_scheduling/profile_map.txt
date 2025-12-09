@@ -1,5 +1,0 @@
-# NINA Profile ID to Telescope Name Mapping
-# Format: profile_id=telescope_name
-# One mapping per line
-
-ddf033e5-b0e2-4daf-9ebe-71b46a091495=SCT 8-inch
