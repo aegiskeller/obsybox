@@ -1,0 +1,11 @@
+﻿python.exe : INFO: Running LIGHT scan under D:\
+At C:\Users\Admin\Documents\Arduino\obsybox\nina_scheduling\run_scan_to_file.ps1:10 char:1
++ & $pythonExe scan_data_dirs.py --dry-run 2>&1 | Out-File -FilePath ca ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO: Running LIGHT scan under D:\:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+WARNING: File may have been truncated: actual file length (20270251) is smaller than the expected size (52191360) 
+[astropy.io.fits.file]
+WARNING: File may have been truncated: actual file length (20270251) is smaller than the expected size (52191360)
+INFO: Running Seestar scan under D:\Seestar
