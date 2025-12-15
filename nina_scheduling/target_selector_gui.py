@@ -1111,7 +1111,19 @@ class TargetSelectorGUI:
                 self.targets_text.insert('end', f"  Minima (Local):    {local_time}\n")
                 self.targets_text.insert('end', f"  Obs Window:        {obs_start} - {obs_end} local\n")
             
-            self.targets_text.insert('end', f"  Magnitude Range:   {target.get('mag_min', 'N/A')} - {target.get('mag_max', 'N/A')}\n")
+            # Format magnitude range, handling missing/invalid mag_min
+            mag_min = target.get('mag_min', 'N/A')
+            mag_max = target.get('mag_max', 'N/A')
+            try:
+                # If mag_min is 0 or very small (invalid), show only mag_max
+                if mag_min != 'N/A' and (float(mag_min) < 0.1 or mag_min == 0):
+                    mag_display = f"{mag_max} (max)"
+                else:
+                    mag_display = f"{mag_min} - {mag_max}"
+            except (ValueError, TypeError):
+                mag_display = f"{mag_min} - {mag_max}"
+            
+            self.targets_text.insert('end', f"  Magnitude Range:   {mag_display}\n")
             self.targets_text.insert('end', f"  Altitude:          {target.get('altitude', 'N/A')}°\n")
             self.targets_text.insert('end', f"  Azimuth:           {target.get('azimuth', 'N/A')}\n")
             self.targets_text.insert('end', f"  Type:              {target.get('variability_type', 'N/A')}\n")

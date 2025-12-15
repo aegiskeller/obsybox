@@ -2421,12 +2421,16 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
         return
     
     if db_path is None:
-        # Use default database name in same directory
-        db_path = Path(__file__).parent / "observations.sqlite"
+        # Use default database on Z: drive
+        db_path = Path("Z:/scheduled_observations.sqlite")
         logger.info(f"Using database: {db_path}")
+    
+    # DEBUG: Log the incoming telescope parameter
+    logger.info(f"record_scheduled_targets called with telescope='{telescope}' (type: {type(telescope).__name__})")
     
     if telescope is None:
         telescope = "SCT 8-inch"  # Default telescope
+        logger.info(f"Telescope was None, using default: {telescope}")
     
     # Check if any targets have already been observed or scheduled
     already_observed, already_scheduled = check_already_observed(targets, observation_date, db_path)
@@ -2446,9 +2450,11 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
     obs_date_str = observation_date.strftime('%Y-%m-%d')
     
     try:
-        marked = mark_targets_scheduled(db_path, targets, obs_date_str, telescope)
+        # Note: We pass None for sequence_file_path here since files haven't been created yet
+        # The sequence records will be created with just the target name
+        marked = mark_targets_scheduled(db_path, targets, obs_date_str, telescope, sequence_file_path=None)
         if marked > 0:
-            logger.info(f"Marked {marked} existing exposures as scheduled in database")
+            logger.info(f"Created {marked} scheduled_targets records in database")
         logger.info(f"Recorded {len(targets)} targets as scheduled for {obs_date_str}")
     except Exception as e:
         logger.warning(f"Could not record scheduled targets in database: {e}")
