@@ -1398,10 +1398,8 @@ class TargetSelectorGUI:
     
     def get_export_path_display(self):
         """Get the current export path for display in the GUI"""
-        from datetime import date
-        today = date.today()
-        date_str = today.strftime('%Y%m%d')
-        full_path = Path(NINA_EXPORT_BASE_DIR) / date_str
+        telescope = self.telescope_var.get() if hasattr(self, 'telescope_var') else 'SCT'
+        full_path = Path(NINA_EXPORT_BASE_DIR) / telescope
         return str(full_path)
     
     def update_export_path_display(self):
@@ -1433,19 +1431,15 @@ class TargetSelectorGUI:
             if not base_export_path:
                 base_export_path = str(NINA_EXPORT_BASE_DIR)  # Fallback to default
             
-            # Append telescope name if configured
+            # Get telescope selection
             telescope = self.telescope_var.get()
-            if telescope and telescope.strip():
-                telescope_suffix = telescope.strip()
-                if telescope_suffix == "S50":
-                    base_export_path = str(Path(base_export_path) / "S50")
-                else:
-                    base_export_path = str(Path(base_export_path) / telescope_suffix)
             
-            # Create date-based subdirectory
-            today = date.today()
-            date_str = today.strftime('%Y%m%d')
-            output_dir = Path(base_export_path) / date_str
+            # Create telescope-specific subdirectory (VarStars/S50 or VarStars/SCT)
+            if telescope and telescope.strip():
+                output_dir = Path(base_export_path) / telescope.strip()
+            else:
+                # Default to SCT if no telescope selected
+                output_dir = Path(base_export_path) / "SCT"
             
             # Export NINA JSON files with custom path and telescope selection
             export_to_nina_json(self.selected_targets, output_dir=output_dir, telescope=telescope)
