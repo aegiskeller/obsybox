@@ -1630,6 +1630,10 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     logger.info(f"Exporting {len(targets)} targets to NINA JSON format in {output_dir}")
     
     created_files = []  # Track created files for return value
+    
+    # Log each target name for debugging
+    target_names = [t.get('name', 'Unknown') for t in targets]
+    logger.info(f"Target list: {', '.join(target_names)}")
 
     def _normalize_nina_ids(obj: Any) -> Any:
         """
@@ -1703,6 +1707,7 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
     
     for i, target in enumerate(targets):
         target_name = target.get('name', 'Unknown')
+        logger.info(f"Processing target {i+1}/{len(targets)}: {target_name}")
         ra_str = target.get('ra', '00:00:00')
         dec_str = target.get('dec', '+00:00:00')
         minima_time = target.get('minimum_time', '')
