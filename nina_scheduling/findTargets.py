@@ -1594,7 +1594,8 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         # Create date-based directory structure using configurable base path
         today = date.today()
         date_str = today.strftime('%Y%m%d')  # Format: 20251102
-        output_dir = Path(NINA_EXPORT_BASE_DIR) / date_str
+        telescope_dir = telescope if telescope else "SCT"
+        output_dir = Path(NINA_EXPORT_BASE_DIR) / telescope_dir / date_str
     else:
         # Convert string to Path object if needed
         output_dir = Path(output_dir)
@@ -1980,7 +1981,8 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         # Create date-based directory structure using configurable base path
         today = date.today()
         date_str = today.strftime('%Y%m%d')  # Format: 20251102
-        output_dir = Path(NINA_EXPORT_BASE_DIR).parent / "Sequences" / date_str
+        telescope_dir = telescope if telescope else "SCT"
+        output_dir = Path(NINA_EXPORT_BASE_DIR).parent / "Sequences" / telescope_dir / date_str
         
     # Always ensure the output directory exists (whether default or custom)
     output_dir.mkdir(parents=True, exist_ok=True)
