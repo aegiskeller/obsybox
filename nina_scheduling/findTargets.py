@@ -1595,7 +1595,7 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         today = date.today()
         date_str = today.strftime('%Y%m%d')  # Format: 20251102
         telescope_dir = telescope if telescope else "SCT"
-        output_dir = Path(NINA_EXPORT_BASE_DIR) / telescope_dir / date_str
+        output_dir = Path(NINA_EXPORT_BASE_DIR).parent / "VarStars" / telescope_dir / date_str
     else:
         # Convert string to Path object if needed
         output_dir = Path(output_dir)

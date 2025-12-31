@@ -1427,30 +1427,27 @@ class TargetSelectorGUI:
                 # Continue with export even if database recording fails
             
             # Get the configured export path from the GUI entry
-            base_export_path = self.nina_export_base_dir_entry.get().strip()
-            if not base_export_path:
-                base_export_path = str(NINA_EXPORT_BASE_DIR)  # Fallback to default
-            
             # Get telescope selection
             telescope = self.telescope_var.get()
+            if not telescope or not telescope.strip():
+                telescope = "SCT"  # Default to SCT if no telescope selected
             
-            # Create telescope-specific subdirectory (VarStars/S50 or VarStars/SCT)
-            if telescope and telescope.strip():
-                output_dir = Path(base_export_path) / telescope.strip()
+            # Let export_to_nina_json build the full path structure: path/VarStars/<telescope>/<date>
+            # Pass None for output_dir to use the default path construction
+            created_files = export_to_nina_json(self.selected_targets, output_dir=None, telescope=telescope)
+            
+            if created_files:
+                output_dir = created_files[0].parent if created_files else "unknown"
+                self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
+                messagebox.showinfo(
+                    "Export Successful",
+                    f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
+                    f"{output_dir}\n\n"
+                    f"Targets have been recorded in the database."
+                )
             else:
-                # Default to SCT if no telescope selected
-                output_dir = Path(base_export_path) / "SCT"
-            
-            # Export NINA JSON files with custom path and telescope selection
-            export_to_nina_json(self.selected_targets, output_dir=output_dir, telescope=telescope)
-            
-            self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
-            messagebox.showinfo(
-                "Export Successful",
-                f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
-                f"{output_dir}\n\n"
-                f"Targets have been recorded in the database."
-            )
+                self.log_message("Export failed - no files created", 'error')
+                messagebox.showerror("Export Error", "No files were created during export")
         except Exception as e:
             self.log_message(f"Export failed: {str(e)}", 'error')
             messagebox.showerror("Export Error", f"Failed to export NINA JSON:\n{str(e)}")
