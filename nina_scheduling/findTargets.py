@@ -1767,17 +1767,21 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 end_hours = 0
                 end_minutes = 0
         
-        # Calculate exposure time based on magnitude
-        mag_max_str = target.get('mag_max', '12.0')
-        try:
-            mag_max = float(mag_max_str)
-            # Use instrument-specific exposure time scaling
-            instrument = telescope if telescope in ['SCT', 'S50'] else 'SCT'
-            exposure_time = get_exposure_time(mag_max, instrument=instrument)
-            logger.info(f"Target {target_name}: mag_max={mag_max}, exposure_time={exposure_time}s (instrument={instrument})")
-        except (ValueError, TypeError):
-            exposure_time = 40.0  # Default fallback
-            logger.warning(f"Could not parse magnitude for {target_name}, using default exposure time {exposure_time}s")
+        # Calculate exposure time based on magnitude (or use fixed 10s for S50)
+        if telescope == "S50":
+            exposure_time = 10
+            logger.info(f"Target {target_name}: Using fixed exposure time for S50: {exposure_time}s")
+        else:
+            mag_max_str = target.get('mag_max', '12.0')
+            try:
+                mag_max = float(mag_max_str)
+                # Use instrument-specific exposure time scaling
+                instrument = telescope if telescope in ['SCT', 'S50'] else 'SCT'
+                exposure_time = get_exposure_time(mag_max, instrument=instrument)
+                logger.info(f"Target {target_name}: mag_max={mag_max}, exposure_time={exposure_time}s (instrument={instrument})")
+            except (ValueError, TypeError):
+                exposure_time = 40.0  # Default fallback
+                logger.warning(f"Could not parse magnitude for {target_name}, using default exposure time {exposure_time}s")
         
         # Create a deep copy of the template for this target
         import copy
@@ -2166,15 +2170,19 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 else 0
         dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 else 0.0
         
-        # Calculate exposure time
-        mag_max_str = target.get('mag_max', '12.0')
-        try:
-            mag_max = float(mag_max_str)
-            # Use instrument-specific exposure time scaling
-            instrument = telescope if telescope in ['SCT', 'S50'] else 'SCT'
-            exposure_time = get_exposure_time(mag_max, instrument=instrument)
-        except (ValueError, TypeError):
-            exposure_time = 40.0
+        # Calculate exposure time (or use fixed 10s for S50)
+        if telescope == "S50":
+            exposure_time = 10
+            logger.info(f"Target {target_name}: Using fixed exposure time for S50: {exposure_time}s")
+        else:
+            mag_max_str = target.get('mag_max', '12.0')
+            try:
+                mag_max = float(mag_max_str)
+                # Use instrument-specific exposure time scaling
+                instrument = telescope if telescope in ['SCT', 'S50'] else 'SCT'
+                exposure_time = get_exposure_time(mag_max, instrument=instrument)
+            except (ValueError, TypeError):
+                exposure_time = 40.0
             
         # Create target container from template
         target_container = copy.deepcopy(target_template)
