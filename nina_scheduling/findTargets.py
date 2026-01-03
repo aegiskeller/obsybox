@@ -540,6 +540,8 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
         'azimuth_filtered': 0,
         'declination_filtered': 0,
         'g_targets_filtered': 0,
+        'coordinates_filtered': 0,
+        'coordinates_looked_up': 0,
         'passed': 0
     }
     
@@ -594,25 +596,41 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
             passed = False
             continue
         
+        # Check for valid RA/Dec coordinates
         if passed:
-            stats['passed'] += 1
+            ra = target.get('ra', '').strip()
+            dec = target.get('dec', '').strip()
             
-            # Try to get RA/Dec if not already present
-            if not target.get('ra') or not target.get('dec'):
+            # If RA or Dec is missing or empty, try to look it up
+            if not ra or not dec:
                 star_name = target.get('name', '')
                 constellation = target.get('constellation', '')
+                logger.info(f"Target '{star_name}' missing coordinates, attempting SIMBAD lookup...")
                 
-                # Only lookup coordinates for a subset to avoid too many queries
-                # We'll lookup as needed during altitude checking
-                target['ra'] = ''
-                target['dec'] = ''
-            
+                ra_new, dec_new = lookup_coordinates_simbad(star_name, constellation)
+                
+                if ra_new and dec_new:
+                    target['ra'] = ra_new
+                    target['dec'] = dec_new
+                    stats['coordinates_looked_up'] += 1
+                    logger.info(f"  Found coordinates: RA={ra_new}, Dec={dec_new}")
+                else:
+                    # Could not find coordinates - filter out this target
+                    logger.warning(f"  Could not find coordinates for '{star_name}', filtering out")
+                    stats['coordinates_filtered'] += 1
+                    passed = False
+                    continue
+        
+        if passed:
+            stats['passed'] += 1
             filtered.append(target)
     
     logger.info(f"Filter stats: {stats['passed']} passed, "
                 f"{stats['magnitude_filtered']} filtered by magnitude, "
                 f"{stats['altitude_filtered']} filtered by altitude, "
                 f"{stats['azimuth_filtered']} filtered by azimuth, "
+                f"{stats['coordinates_filtered']} filtered (missing coordinates), "
+                f"{stats['coordinates_looked_up']} coordinates looked up from SIMBAD, "
                 f"{stats['g_targets_filtered']} G-targets filtered")
     
     return filtered
@@ -1716,20 +1734,20 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         
         # Parse RA (HH:MM:SS.SS format)
         ra_parts = ra_str.split(':')
-        ra_hours = int(ra_parts[0]) if len(ra_parts) > 0 else 0
-        ra_minutes = int(ra_parts[1]) if len(ra_parts) > 1 else 0
-        ra_seconds = float(ra_parts[2]) if len(ra_parts) > 2 else 0.0
+        ra_hours = int(ra_parts[0]) if len(ra_parts) > 0 and ra_parts[0].strip() else 0
+        ra_minutes = int(ra_parts[1]) if len(ra_parts) > 1 and ra_parts[1].strip() else 0
+        ra_seconds = float(ra_parts[2]) if len(ra_parts) > 2 and ra_parts[2].strip() else 0.0
         
         # Parse Dec (±DD:MM:SS.SS format)
         dec_negative = dec_str.startswith('-')
         dec_str_abs = dec_str.lstrip('+-')
         dec_parts = dec_str_abs.split(':')
-        dec_degrees = int(dec_parts[0]) if len(dec_parts) > 0 else 0
+        dec_degrees = int(dec_parts[0]) if len(dec_parts) > 0 and dec_parts[0].strip() else 0
         # Keep the negative sign on dec_degrees if declination is negative
         if dec_negative:
             dec_degrees = -dec_degrees
-        dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 else 0
-        dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 else 0.0
+        dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 and dec_parts[1].strip() else 0
+        dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 and dec_parts[2].strip() else 0.0
         
         # Parse minima time to get observation start and end times
         minima_datetime = target.get('minima_datetime_local')
@@ -2156,19 +2174,19 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         
         # Parse RA (HH:MM:SS.SS format)
         ra_parts = ra_str.split(':')
-        ra_hours = int(ra_parts[0]) if len(ra_parts) > 0 else 0
-        ra_minutes = int(ra_parts[1]) if len(ra_parts) > 1 else 0
-        ra_seconds = float(ra_parts[2]) if len(ra_parts) > 2 else 0.0
+        ra_hours = int(ra_parts[0]) if len(ra_parts) > 0 and ra_parts[0].strip() else 0
+        ra_minutes = int(ra_parts[1]) if len(ra_parts) > 1 and ra_parts[1].strip() else 0
+        ra_seconds = float(ra_parts[2]) if len(ra_parts) > 2 and ra_parts[2].strip() else 0.0
         
         # Parse Dec (±DD:MM:SS.SS format)
         dec_negative = dec_str.startswith('-')
         dec_str_abs = dec_str.lstrip('+-')
         dec_parts = dec_str_abs.split(':')
-        dec_degrees = int(dec_parts[0]) if len(dec_parts) > 0 else 0
+        dec_degrees = int(dec_parts[0]) if len(dec_parts) > 0 and dec_parts[0].strip() else 0
         if dec_negative:
             dec_degrees = -dec_degrees
-        dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 else 0
-        dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 else 0.0
+        dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 and dec_parts[1].strip() else 0
+        dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 and dec_parts[2].strip() else 0.0
         
         # Calculate exposure time (or use fixed 10s for S50)
         if telescope == "S50":
@@ -2335,8 +2353,12 @@ def check_already_observed(targets: List[Dict], observation_date: date, db_path:
             
             # Check if this target has exposures on this observation night
             cursor.execute('''
-                SELECT COUNT(*) FROM nina_log_exposures 
-                WHERE target_name = ? AND observation_night = ?
+                SELECT COUNT(*) 
+                FROM observations o
+                JOIN scheduled_targets st ON o.scheduled_target_id = st.scheduled_target_id
+                JOIN observation_nights on_ ON st.night_id = on_.night_id
+                JOIN targets t ON st.target_id = t.target_id
+                WHERE t.target_name = ? AND on_.date_obs = ?
             ''', (target_name, obs_date_str))
             
             count = cursor.fetchone()[0]
@@ -2344,11 +2366,14 @@ def check_already_observed(targets: List[Dict], observation_date: date, db_path:
                 already_observed.append(target_name)
             
             # Check if this target is already scheduled for this night (but not yet observed)
+            # Exclude targets with status='failed' to allow rescheduling
             cursor.execute('''
-                SELECT COUNT(*) FROM nina_scheduled_targets 
-                WHERE target_name = ? 
-                AND scheduled_for_night = ?
-                AND observed_on IS NULL
+                SELECT COUNT(*) 
+                FROM scheduled_targets st
+                JOIN observation_nights on_ ON st.night_id = on_.night_id
+                JOIN targets t ON st.target_id = t.target_id
+                WHERE t.target_name = ? AND on_.date_obs = ?
+                AND (st.status IS NULL OR st.status != 'failed')
             ''', (target_name, obs_date_str))
             
             scheduled_count = cursor.fetchone()[0]
