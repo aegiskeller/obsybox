@@ -1,27 +1,33 @@
-# using a calll to https://var.astro.cz/en/Stars/MinimaPredictions?pageId=1&pageSize=20&obsLat=50&obsLong=15&tabId=predTab1&date=2025-10-25&showVisibleEventsOnly=true
+# using a call to https://var.astro.cz/en/Stars/MinimaPredictions?pageId=1&pageSize=20&obsLat=50&obsLong=15&tabId=predTab1&date=2025-10-25&showVisibleEventsOnly=true
 # with the users latitude and longitude set to -35 and 150 respectively
 # we collect the minima predictions for the next night 
 # from this list we draw targets for nina scheduling
-
 import logging
 import re
-from datetime import date
-from pathlib import Path
+import sys
+import time
+import math
+import json
+import csv
+import copy
+import sqlite3
+import traceback
 import requests
+import tkinter as tk
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup
-import json
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from secrets import VARASTRO_USERNAME, VARASTRO_PASSWORD
-from datetime import datetime, timedelta
-import math
-import sqlite3
 import tkinter as tk
 from tkinter import messagebox
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 # Astropy imports for accurate astronomical calculations
 from astropy.coordinates import EarthLocation, AltAz, SkyCoord, SkyCoord as coord
@@ -178,6 +184,7 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         pred_url = (f"https://var.astro.cz/en/Stars/MinimaPredictions?init=1"
                    f"&obsLat={LATITUDE}&obsLong={LONGITUDE}"
                    f"&date={obs_date.strftime('%Y-%m-%d')}"
+
                    f"&showVisibleEventsOnly=true")
         logger.info(f"Requesting predictions for date: {obs_date.strftime('%Y-%m-%d')} (YYYY-MM-DD format)")
         logger.info(f"URL: {pred_url}")
@@ -249,7 +256,6 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
                     elif new_value == 'NOT_FOUND':
                         logger.error("❌ Date field 'pred-date' not found!")
                         break
-                
                 if not date_set:
                     logger.warning(f"⚠️  All date format attempts failed. Field value remains: '{new_value}'")
                 
@@ -257,6 +263,7 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
                 if date_set:
                     logger.info("Triggering form update...")
                     driver.execute_script("""
+
                         // Look for and click a submit or update button
                         var submitButton = document.querySelector('button[type="submit"]') || 
                                          document.querySelector('input[type="submit"]') ||
@@ -278,6 +285,7 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
             
             if not date_set:
                 logger.error(f"❌ FAILED to set date field! This will result in wrong targets (yesterday's data)!")
+
                 logger.error(f"Expected date: {target_date}")
             
             # Wait longer for table to reload after date change
@@ -438,6 +446,8 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
                     try:
                         # Execute JavaScript to get row data from DataTable API
                         row_data = driver.execute_script("""
+
+
                             var table = $('#minima-pred-table').DataTable();
                             var rowData = table.row(arguments[0]).data();
                             return rowData;
@@ -489,21 +499,31 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         
         logger.info(f"Found {len(targets)} total targets across {page_num} page(s)")
         
-        # Save raw data to cache
-        cache_file = Path(__file__).parent / f"cache_raw_targets_{obs_date}.json"
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(targets, f, indent=2, ensure_ascii=False)
-        logger.info(f"Saved raw data to cache: {cache_file}")
+        # Apply quick filters BEFORE coordinate enrichment to reduce workload
+        logger.info("Applying basic filters (magnitude, altitude, azimuth, G-targets)...")
+        filtered_targets = apply_basic_filters(targets)
+        logger.info(f"After basic filters: {len(filtered_targets)} targets remain (saved {len(targets) - len(filtered_targets)} coordinate lookups)")
         
-        # Apply post-processing filters
-        filtered_targets = apply_filters(targets)
-        logger.info(f"After applying basic filters: {len(filtered_targets)} targets remain")
-        
-        # Apply observation night filtering with correct timezone handling
+        # Apply observation night filtering
         night_filtered_targets = filter_targets_by_observation_night(filtered_targets, obs_date)
         logger.info(f"After observation night filtering: {len(night_filtered_targets)} targets remain")
         
-        return night_filtered_targets
+        # NOW enrich only the filtered targets with coordinates
+        logger.info(f"Resolving coordinates for {len(night_filtered_targets)} filtered targets...")
+        night_filtered_targets = enrich_targets_with_coordinates(night_filtered_targets, driver)
+        logger.info("Coordinate resolution complete")
+        
+        # Save enriched and filtered data to cache
+        cache_file = Path(__file__).parent / f"cache_raw_targets_{obs_date}.json"
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(night_filtered_targets, f, indent=2, ensure_ascii=False)
+        logger.info(f"Saved enriched data to cache: {cache_file}")
+        
+        # Final filter check for any remaining issues
+        final_targets = apply_final_filters(night_filtered_targets)
+        logger.info(f"After final filters: {len(final_targets)} targets remain")
+        
+        return final_targets
         
     except Exception as e:
         logger.error(f"Error fetching data with Selenium: {e}")
@@ -523,9 +543,154 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         if driver:
             driver.quit()
 
-def apply_filters(targets: List[Dict]) -> List[Dict]:
+def enrich_targets_with_coordinates(targets: List[Dict], driver=None, max_workers: int = 5) -> List[Dict]:
     """
-    Apply filters to the targets list
+    Enrich targets with RA/Dec coordinates by looking them up from SIMBAD or var.astro.cz
+    
+    Uses parallel threading to speed up coordinate lookups.
+    
+    Args:
+        targets: List of target dictionaries
+        driver: Existing Selenium webdriver (optional, will create new ones per thread)
+        max_workers: Maximum number of parallel threads (default: 5)
+        
+    Returns:
+        Enriched list of targets with coordinates filled in
+    """
+    stats = {
+        'total': len(targets),
+        'already_had_coords': 0,
+        'simbad_success': 0,
+        'varastro_success': 0,
+        'lookup_failed': 0
+    }
+    stats_lock = Lock()
+    progress_lock = Lock()
+    completed_count = [0]  # Use list to allow modification in nested function
+    
+    def lookup_single_target(index_and_target):
+        """Lookup coordinates for a single target (thread-safe)"""
+        i, target = index_and_target
+        ra = target.get('ra', '').strip()
+        dec = target.get('dec', '').strip()
+        
+        # Skip if already has coordinates
+        if ra and dec:
+            with stats_lock:
+                stats['already_had_coords'] += 1
+            return target
+        
+        star_name = target.get('name', '')
+        constellation = target.get('constellation', '')
+        star_id = target.get('id', '')
+        
+        # G catalog stars - go directly to var.astro.cz
+        if star_name.startswith('G') and star_id:
+            ra_new, dec_new = fetch_coordinates_from_varastro(star_id, driver=None)  # Each thread creates its own driver
+            
+            if ra_new and dec_new:
+                target['ra'] = ra_new
+                target['dec'] = dec_new
+                with stats_lock:
+                    stats['varastro_success'] += 1
+                return target
+            else:
+                with stats_lock:
+                    stats['lookup_failed'] += 1
+                return target
+        
+        # Try SIMBAD first for non-G catalog stars
+        ra_new, dec_new = lookup_coordinates_simbad(star_name, constellation)
+        
+        if ra_new and dec_new:
+            target['ra'] = ra_new
+            target['dec'] = dec_new
+            with stats_lock:
+                stats['simbad_success'] += 1
+            return target
+        
+        # If SIMBAD failed, try var.astro.cz
+        if star_id:
+            ra_new, dec_new = fetch_coordinates_from_varastro(star_id, driver=None)
+            
+            if ra_new and dec_new:
+                target['ra'] = ra_new
+                target['dec'] = dec_new
+                with stats_lock:
+                    stats['varastro_success'] += 1
+                return target
+        
+        # Could not resolve coordinates
+        with stats_lock:
+            stats['lookup_failed'] += 1
+        return target
+    
+    def update_progress():
+        """Thread-safe progress update"""
+        with progress_lock:
+            completed_count[0] += 1
+            if completed_count[0] % 10 == 0 or completed_count[0] == stats['total']:
+                percent_complete = (completed_count[0] / stats['total']) * 100
+                logger.info(f"Progress: {completed_count[0]}/{stats['total']} targets processed ({percent_complete:.1f}%)")
+    
+    # Separate targets that need lookup from those that don't
+    targets_needing_lookup = []
+    targets_with_coords = []
+    
+    for i, target in enumerate(targets):
+        ra = target.get('ra', '').strip()
+        dec = target.get('dec', '').strip()
+        if ra and dec:
+            targets_with_coords.append(target)
+            stats['already_had_coords'] += 1
+        else:
+            targets_needing_lookup.append((i, target))
+    
+    logger.info(f"Coordinate enrichment: {len(targets_with_coords)} targets already have coords, "
+                f"{len(targets_needing_lookup)} need lookup")
+    
+    if not targets_needing_lookup:
+        return targets
+    
+    logger.info(f"Using {max_workers} parallel threads for coordinate lookups...")
+    
+    # Process lookups in parallel
+    enriched_targets = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all lookup tasks
+        future_to_target = {
+            executor.submit(lookup_single_target, item): item 
+            for item in targets_needing_lookup
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_target):
+            try:
+                result = future.result()
+                enriched_targets.append(result)
+                update_progress()
+            except Exception as e:
+                index, target = future_to_target[future]
+                logger.error(f"Error processing target '{target.get('name', 'unknown')}': {e}")
+                enriched_targets.append(target)
+                update_progress()
+    
+    # Combine results (maintaining original order)
+    all_targets = targets_with_coords + enriched_targets
+    
+    logger.info(f"Coordinate enrichment complete: "
+                f"{stats['already_had_coords']} already had coords, "
+                f"{stats['simbad_success']} from SIMBAD, "
+                f"{stats['varastro_success']} from var.astro.cz, "
+                f"{stats['lookup_failed']} failed")
+    
+    return all_targets
+
+
+def apply_basic_filters(targets: List[Dict]) -> List[Dict]:
+    """
+    Apply basic filters that don't require coordinates
+    (magnitude, altitude at minima, azimuth, G-targets)
     
     Args:
         targets: List of target dictionaries
@@ -538,10 +703,7 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
         'magnitude_filtered': 0,
         'altitude_filtered': 0,
         'azimuth_filtered': 0,
-        'declination_filtered': 0,
         'g_targets_filtered': 0,
-        'coordinates_filtered': 0,
-        'coordinates_looked_up': 0,
         'passed': 0
     }
     
@@ -578,9 +740,9 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
             passed = False
             continue
         
-        # Filter by altitude
+        # Filter by altitude at minima (doesn't need RA/Dec)
         try:
-            altitude = float(target.get('altitude', '0').replace(',', '.').replace('°', ''))
+            altitude = float(target.get('altitude', '0'))
             if altitude < MIN_ALTITUDE:
                 stats['altitude_filtered'] += 1
                 passed = False
@@ -596,44 +758,79 @@ def apply_filters(targets: List[Dict]) -> List[Dict]:
             passed = False
             continue
         
-        # Check for valid RA/Dec coordinates
         if passed:
-            ra = target.get('ra', '').strip()
-            dec = target.get('dec', '').strip()
-            
-            # If RA or Dec is missing or empty, try to look it up
-            if not ra or not dec:
-                star_name = target.get('name', '')
-                constellation = target.get('constellation', '')
-                logger.info(f"Target '{star_name}' missing coordinates, attempting SIMBAD lookup...")
-                
-                ra_new, dec_new = lookup_coordinates_simbad(star_name, constellation)
-                
-                if ra_new and dec_new:
-                    target['ra'] = ra_new
-                    target['dec'] = dec_new
-                    stats['coordinates_looked_up'] += 1
-                    logger.info(f"  Found coordinates: RA={ra_new}, Dec={dec_new}")
-                else:
-                    # Could not find coordinates - filter out this target
-                    logger.warning(f"  Could not find coordinates for '{star_name}', filtering out")
-                    stats['coordinates_filtered'] += 1
-                    passed = False
-                    continue
-        
-        if passed:
-            stats['passed'] += 1
             filtered.append(target)
+            stats['passed'] += 1
     
-    logger.info(f"Filter stats: {stats['passed']} passed, "
+    logger.info(f"Basic filter stats: {stats['passed']} passed, "
                 f"{stats['magnitude_filtered']} filtered by magnitude, "
                 f"{stats['altitude_filtered']} filtered by altitude, "
                 f"{stats['azimuth_filtered']} filtered by azimuth, "
-                f"{stats['coordinates_filtered']} filtered (missing coordinates), "
-                f"{stats['coordinates_looked_up']} coordinates looked up from SIMBAD, "
                 f"{stats['g_targets_filtered']} G-targets filtered")
     
     return filtered
+
+
+def apply_final_filters(targets: List[Dict]) -> List[Dict]:
+    """
+    Apply final filters that require coordinates (after enrichment)
+    
+    Args:
+        targets: List of target dictionaries with coordinates
+        
+    Returns:
+        Filtered list of targets
+    """
+    filtered = []
+    stats = {
+        'coordinates_filtered': 0,
+        'passed': 0
+    }
+    
+    for target in targets:
+        passed = True
+        
+        # Check for valid RA/Dec coordinates (should already be in cache)
+        ra = target.get('ra', '').strip()
+        dec = target.get('dec', '').strip()
+        
+        # Filter out targets that still don't have coordinates
+        if not ra or not dec:
+            star_name = target.get('name', '')
+            logger.warning(f"Target '{star_name}' missing coordinates (coordinate lookup failed), filtering out")
+            stats['coordinates_filtered'] += 1
+            passed = False
+            continue
+        
+        if passed:
+            filtered.append(target)
+            stats['passed'] += 1
+    
+    logger.info(f"Final filter stats: {stats['passed']} passed, "
+                f"{stats['coordinates_filtered']} filtered (missing coordinates)")
+    
+    return filtered
+
+
+def apply_filters(targets: List[Dict]) -> List[Dict]:
+    """
+    Apply ALL filters to the targets list (for cached data)
+    This is used when loading from cache - runs both basic and final filters
+    
+    Args:
+        targets: List of target dictionaries
+        
+    Returns:
+        Filtered list of targets
+    """
+    # Apply basic filters first
+    filtered = apply_basic_filters(targets)
+    # Apply basic filters first
+    filtered = apply_basic_filters(targets)
+    # Then apply final filters
+    filtered = apply_final_filters(filtered)
+    return filtered
+
 
 def filter_targets_by_observation_night(targets: List[Dict], observation_date: date) -> List[Dict]:
     """
@@ -959,39 +1156,93 @@ def lookup_coordinates_simbad(star_name: str, constellation: str = '') -> tuple:
     Lookup RA/Dec coordinates for a star using SIMBAD
     
     Args:
-        star_name: Star name (e.g., "V1812", "KQ")
+        star_name: Star name (e.g., "V1812", "KQ", "RS Col", "V2759 Ori")
         constellation: Constellation abbreviation (e.g., "Aql", "Psc")
         
     Returns:
         Tuple of (ra_str, dec_str) or (None, None) if not found
     """
     try:
-        # SIMBAD requires full name with constellation
-        if not constellation:
-            logger.debug(f"No constellation provided for {star_name}, cannot query SIMBAD")
-            return (None, None)
+        # Build query name - try multiple strategies
+        query_names = []
         
-        query_name = f"{star_name} {constellation}"
+        # Remove constellation suffix for survey stars with coordinate-based names
+        # e.g., "ASAS  J042851-4035.3 Cae" -> "ASAS  J042851-4035.3"
+        # But keep constellation for traditional variable stars like "V1123 Tau", "RS Col"
+        cleaned_star_name = star_name
+        if constellation:
+            # Check if this is a survey star with coordinates (ASAS, OGLE, etc.)
+            import re
+            # Pattern: survey prefix followed by coordinates
+            survey_pattern = r'^(ASAS|OGLE|CRTS|ATLAS|ZTF|Gaia|MASTER|TESS)\s+[BJ]?[\d\-\+\.: ]+$'
+            
+            # Check if star name ends with the constellation AND matches survey pattern
+            if star_name.strip().lower().endswith(constellation.lower()):
+                name_without_const = star_name.strip()[:-len(constellation)].strip()
+                if re.match(survey_pattern, name_without_const, re.IGNORECASE):
+                    cleaned_star_name = name_without_const
+                    logger.debug(f"Removed constellation suffix from survey star '{star_name}' -> '{cleaned_star_name}'")
         
-        # Query SIMBAD
-        result_table = Simbad.query_object(query_name)
+        # Special handling for NSV stars: "NSV 01105 For" -> "NSV01105"
+        if cleaned_star_name.startswith('NSV '):
+            # Extract the number and remove spaces
+            nsv_compact = cleaned_star_name.replace(' ', '')  # "NSV01105For" or "NSV01105"
+            # Try just NSV + number without constellation
+            import re
+            nsv_match = re.match(r'(NSV\d+)', nsv_compact)
+            if nsv_match:
+                query_names.append(nsv_match.group(1))  # "NSV01105"
         
-        if result_table is not None and len(result_table) > 0:
-            # Get RA/Dec from result
-            ra = result_table['RA'][0]  # Format: "HH MM SS.ss"
-            dec = result_table['DEC'][0]  # Format: "+DD MM SS.s"
-            
-            # Convert to standard format
-            ra_str = ra.replace(' ', ':')
-            dec_str = dec.replace(' ', ':')
-            
-            logger.debug(f"Found coordinates for {query_name}: RA={ra_str}, Dec={dec_str}")
-            return (ra_str, dec_str)
-            
+        # Strategy 1: Use cleaned star_name (works for "RS Col", "V2759 Ori", "ASAS J042851-4035.3")
+        query_names.append(cleaned_star_name)
+        
+        # Strategy 2: Add constellation if provided and not already in name
+        if constellation and constellation.lower() not in cleaned_star_name.lower():
+            query_names.append(f"{cleaned_star_name} {constellation}")
+        
+        # Try each query variation
+        for query_name in query_names:
+            try:
+                logger.debug(f"Querying SIMBAD with: '{query_name}'")
+                
+                # Query SIMBAD - modern TAP API returns coordinates in degrees
+                result_table = Simbad.query_object(query_name)
+                
+                if result_table is not None and len(result_table) > 0:
+                    # Modern SIMBAD TAP returns 'ra' and 'dec' columns in degrees
+                    if 'ra' in result_table.colnames and 'dec' in result_table.colnames:
+                        ra_deg = float(result_table['ra'][0])
+                        dec_deg = float(result_table['dec'][0])
+                        
+                        # Convert degrees to HH:MM:SS and DD:MM:SS using SkyCoord
+                        coord_obj = SkyCoord(ra=ra_deg*u.degree, dec=dec_deg*u.degree)
+                        ra_str = coord_obj.ra.to_string(unit=u.hour, sep=':', precision=2, pad=True)
+                        dec_str = coord_obj.dec.to_string(unit=u.degree, sep=':', precision=1, pad=True, alwayssign=True)
+                        
+                        logger.info(f"Found coordinates for '{query_name}': RA={ra_str}, Dec={dec_str}")
+                        return (ra_str, dec_str)
+                    
+                    # Fallback: try old format columns if they exist
+                    elif 'RA' in result_table.colnames and 'DEC' in result_table.colnames:
+                        ra = result_table['RA'][0]  # Format: "HH MM SS.ss"
+                        dec = result_table['DEC'][0]  # Format: "+DD MM SS.s"
+                        
+                        # Convert to standard format
+                        ra_str = ra.replace(' ', ':')
+                        dec_str = dec.replace(' ', ':')
+                        
+                        logger.info(f"Found coordinates for '{query_name}': RA={ra_str}, Dec={dec_str}")
+                        return (ra_str, dec_str)
+                
+            except Exception as e:
+                logger.debug(f"Query failed for '{query_name}': {e}")
+                continue
+        
+        logger.warning(f"Could not find coordinates for '{star_name}' (constellation: '{constellation}') after trying all strategies")
         return (None, None)
         
     except Exception as e:
-        logger.debug(f"Could not lookup coordinates for {star_name} {constellation}: {e}")
+        logger.error(f"Error in SIMBAD lookup for {star_name} {constellation}: {e}")
         return (None, None)
 
 def calculate_altitude_at_time(ra_str: str, dec_str: str, obs_time: datetime, lat: float, lon: float) -> float:
@@ -1098,6 +1349,8 @@ def check_altitude_during_observation(target: Dict, lat: float, lon: float, skip
             
             # First try SIMBAD for standard variable star names (faster)
             # Only lookup for well-known stars (not catalog IDs starting with G, NSV, etc.)
+
+
             if star_name and not star_name.startswith(('G', 'NSV', 'CzeV', 'TYC')):
                 logger.debug(f"Looking up coordinates from SIMBAD for {star_name} ({constellation})...")
                 ra, dec = lookup_coordinates_simbad(star_name, constellation)
@@ -1129,6 +1382,7 @@ def check_altitude_during_observation(target: Dict, lat: float, lon: float, skip
             SAFE_ALTITUDE_AT_MINIMA = 50
             if altitude < SAFE_ALTITUDE_AT_MINIMA:
                 logger.debug(f"{target.get('name', 'unknown')} altitude {altitude}° at minima - need >{SAFE_ALTITUDE_AT_MINIMA}° (no RA/Dec for detailed calc)")
+
                 return False
             return True
         
@@ -1489,7 +1743,7 @@ def parse_datatable_json(data: dict) -> List[Dict]:
                 }
                 targets.append(target)
                 logger.debug(f"Found target: {target['name']}")
-    
+
     return targets
 
 def parse_json_targets(data: dict) -> List[Dict]:
@@ -1508,14 +1762,23 @@ def parse_json_targets(data: dict) -> List[Dict]:
         for item in data['data']:
             target = {
                 'name': item.get('name', ''),
+
                 'constellation': item.get('constellation', ''),
+
                 'minimum_time': item.get('minimumTime', ''),
+
                 'mag_max': item.get('magMax', ''),
+
                 'mag_min': item.get('magMin', ''),
+
                 'altitude': item.get('altitude', ''),
+
                 'azimuth': item.get('azimuth', ''),
+
                 'period': item.get('period', ''),
+
                 'ra': item.get('ra', ''),
+
                 'dec': item.get('dec', '')
             }
             targets.append(target)
@@ -1562,16 +1825,27 @@ def export_to_nina_format(targets: List[Dict], output_path: Path = None):
         for target in targets:
             writer.writerow([
                 target.get('id', ''),
+
                 target.get('name', ''),
+
                 target.get('constellation', ''),
+
                 target.get('ra', ''),
+
                 target.get('dec', ''),
+
                 target.get('minimum_time', ''),
+
                 target.get('mag_max', ''),
+
                 target.get('mag_min', ''),
+
                 target.get('altitude', ''),
+
                 target.get('minima_type', ''),
+
                 target.get('band', ''),
+
                 target.get('variability_type', '')
             ])
     
@@ -1589,6 +1863,107 @@ def export_to_nina_format(targets: List[Dict], output_path: Path = None):
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(json_targets, f, indent=2, ensure_ascii=False)
     logger.info(f"Also saved JSON version: {json_path}")
+
+
+def prompt_s50_exposure_override() -> tuple[bool, float]:
+    """
+    Show dialog to override S50 default exposure time
+    
+    Returns:
+        Tuple of (use_override: bool, exposure_time: float)
+    """
+    logger.info("Showing S50 exposure time override dialog...")
+    
+    # Try to get existing Tk root, or create one if needed
+    try:
+        root = tk._default_root
+        if root is None:
+            root = tk.Tk()
+            root.withdraw()
+            created_root = True
+        else:
+            created_root = False
+    except:
+        root = tk.Tk()
+        root.withdraw()
+        created_root = True
+    
+    dialog = tk.Toplevel(root)
+    dialog.title("S50 Exposure Time Override")
+    dialog.geometry("400x180")
+    dialog.resizable(False, False)
+    
+    # Make dialog modal and bring to front
+    dialog.lift()
+    dialog.focus_force()
+    dialog.attributes('-topmost', True)
+    dialog.after(100, lambda: dialog.attributes('-topmost', False))
+    dialog.grab_set()
+    
+    result = {'override': False, 'exposure_time': 10.0}
+    
+    # Main message
+    tk.Label(dialog, text="Override standard 10\" exptime?", 
+             font=('Arial', 12, 'bold'), pady=10).pack()
+    
+    tk.Label(dialog, text="Default: 10 seconds for S50 telescope",
+             font=('Arial', 9), fg='gray').pack()
+    
+    # Exposure time entry frame
+    entry_frame = tk.Frame(dialog, pady=10)
+    entry_frame.pack()
+    
+    tk.Label(entry_frame, text="Exposure time (seconds):", 
+             font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+    
+    exp_var = tk.StringVar(value="10")
+    exp_entry = tk.Entry(entry_frame, textvariable=exp_var, width=10, 
+                         font=('Arial', 10))
+    exp_entry.pack(side=tk.LEFT, padx=5)
+    exp_entry.select_range(0, tk.END)
+    exp_entry.focus()
+    
+    # Button frame
+    button_frame = tk.Frame(dialog, pady=10)
+    button_frame.pack()
+    
+    def on_yes():
+        try:
+            exp_time = float(exp_var.get())
+            if exp_time <= 0:
+                messagebox.showerror("Invalid Input", "Exposure time must be positive")
+                return
+            result['override'] = True
+            result['exposure_time'] = exp_time
+            dialog.destroy()
+            if created_root:
+                root.destroy()
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid number")
+    
+    def on_no():
+        result['override'] = False
+        result['exposure_time'] = 10.0
+        dialog.destroy()
+        if created_root:
+            root.destroy()
+    
+    tk.Button(button_frame, text="Yes - Use Custom", command=on_yes, 
+              width=15, bg='#4CAF50', fg='white', font=('Arial', 10)).pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="No - Use Default (10s)", command=on_no, 
+              width=18, bg='#888', fg='white', font=('Arial', 10)).pack(side=tk.LEFT, padx=10)
+    
+    # Center the dialog
+    dialog.update_idletasks()
+    x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+    y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+    dialog.geometry(f"+{x}+{y}")
+    
+    # Wait for dialog to close
+    dialog.wait_window()
+    
+    return result['override'], result['exposure_time']
+
 
 def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_file: str = None, mode: str = "individual", telescope: str = None):
     """
@@ -1628,8 +2003,8 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
             template_file = "VarStarS50.template.json"
             logger.info(f"Using S50 template for telescope type: {telescope}")
         else:
-            template_file = NINA_TEMPLATE_FILE
-            logger.info(f"Using default SCT template for telescope type: {telescope}")
+            template_file = "VarStarSCT.template.json"
+            logger.info(f"Using SCT template for telescope type: {telescope}")
     
     # Load template
     template_path = Path(__file__).parent / template_file
@@ -1647,6 +2022,20 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         return
     
     logger.info(f"Exporting {len(targets)} targets to NINA JSON format in {output_dir}")
+    
+    # For S50, ask user about exposure time override
+    s50_exposure_override = None
+    logger.info(f"Telescope type: '{telescope}' (checking for S50 override)")
+    if telescope == "S50":
+        logger.info("Telescope is S50 - prompting for exposure time override")
+        use_override, custom_exptime = prompt_s50_exposure_override()
+        if use_override:
+            s50_exposure_override = custom_exptime
+            logger.info(f"S50 exposure override: using {custom_exptime}s instead of default 10s")
+        else:
+            logger.info(f"S50 exposure: using default 10s")
+    else:
+        logger.info(f"Telescope is not S50 (it's '{telescope}'), skipping exposure override")
     
     created_files = []  # Track created files for return value
     
@@ -1787,8 +2176,12 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
         
         # Calculate exposure time based on magnitude (or use fixed 10s for S50)
         if telescope == "S50":
-            exposure_time = 10
-            logger.info(f"Target {target_name}: Using fixed exposure time for S50: {exposure_time}s")
+            if s50_exposure_override is not None:
+                exposure_time = s50_exposure_override
+                logger.info(f"Target {target_name}: Using custom S50 exposure time: {exposure_time}s")
+            else:
+                exposure_time = 10
+                logger.info(f"Target {target_name}: Using default S50 exposure time: {exposure_time}s")
         else:
             mag_max_str = target.get('mag_max', '12.0')
             try:
@@ -1872,6 +2265,7 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
                 if obj.get("$type") == "NINA.Sequencer.SequenceItem.Imaging.SmartExposure, NINA.Sequencer":
                     # Found SmartExposure, now look for its Conditions
                     conditions = obj.get("Conditions", {})
+
                     values = conditions.get("$values", [])
                     
                     # Find and update the LoopCondition
@@ -2016,8 +2410,8 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
             template_file = "VarStarS50.template.json"
             logger.info(f"Using S50 template for telescope type: {telescope}")
         else:
-            template_file = NINA_TEMPLATE_FILE
-            logger.info(f"Using default SCT template for telescope type: {telescope}")
+            template_file = "VarStarSCT.template.json"
+            logger.info(f"Using SCT template for telescope type: {telescope}")
     if night_template_file is None:
         night_template_file = "night_sequence_complex.json"
     
@@ -2051,6 +2445,16 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         return None
     
     logger.info(f"Generating night sequence with {len(targets)} targets")
+    
+    # For S50, ask user about exposure time override
+    s50_exposure_override = None
+    if telescope == "S50":
+        use_override, custom_exptime = prompt_s50_exposure_override()
+        if use_override:
+            s50_exposure_override = custom_exptime
+            logger.info(f"S50 exposure override: using {custom_exptime}s instead of default 10s")
+        else:
+            logger.info(f"S50 exposure: using default 10s")
 
     # Helper function to normalize IDs (reuse from existing function)
     def _normalize_nina_ids(obj: Any) -> Any:
@@ -2190,8 +2594,12 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         
         # Calculate exposure time (or use fixed 10s for S50)
         if telescope == "S50":
-            exposure_time = 10
-            logger.info(f"Target {target_name}: Using fixed exposure time for S50: {exposure_time}s")
+            if s50_exposure_override is not None:
+                exposure_time = s50_exposure_override
+                logger.info(f"Target {target_name}: Using custom S50 exposure time: {exposure_time}s")
+            else:
+                exposure_time = 10
+                logger.info(f"Target {target_name}: Using default S50 exposure time: {exposure_time}s")
         else:
             mag_max_str = target.get('mag_max', '12.0')
             try:
@@ -2201,7 +2609,8 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
                 exposure_time = get_exposure_time(mag_max, instrument=instrument)
             except (ValueError, TypeError):
                 exposure_time = 40.0
-            
+                logger.warning(f"Could not parse magnitude for {target_name}, using default exposure time {exposure_time}s")
+        
         # Create target container from template
         target_container = copy.deepcopy(target_template)
         
@@ -2273,7 +2682,6 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
             def fix_child_parents(obj, container_id):
                 if isinstance(obj, dict):
                     if "Parent" in obj and obj.get("$id") != container_id:
-                        # If this object has a Parent and it's not the container itself
                         # Point it to the container
                         obj["Parent"] = {"$ref": container_id}
                     for value in obj.values():
@@ -2353,6 +2761,7 @@ def check_already_observed(targets: List[Dict], observation_date: date, db_path:
             
             # Check if this target has exposures on this observation night
             cursor.execute('''
+
                 SELECT COUNT(*) 
                 FROM observations o
                 JOIN scheduled_targets st ON o.scheduled_target_id = st.scheduled_target_id
@@ -2368,6 +2777,7 @@ def check_already_observed(targets: List[Dict], observation_date: date, db_path:
             # Check if this target is already scheduled for this night (but not yet observed)
             # Exclude targets with status='failed' to allow rescheduling
             cursor.execute('''
+
                 SELECT COUNT(*) 
                 FROM scheduled_targets st
                 JOIN observation_nights on_ ON st.night_id = on_.night_id
@@ -2499,7 +2909,7 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
     except Exception as e:
         logger.warning(f"Could not record scheduled targets in database: {e}")
     
-    
+
 if __name__ == "__main__":
     # Create targets output directory
     targets_dir = Path(__file__).parent / "targets"
