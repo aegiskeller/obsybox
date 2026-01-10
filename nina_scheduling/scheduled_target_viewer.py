@@ -13,13 +13,45 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 import logging
+import sys
+import threading
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging to both file and console
+log_file = Path(__file__).parent / "scheduled_target_viewer.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file, mode='w'),  # Overwrite log on each run
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Database path
 DB_PATH = Path("Z:/scheduled_observations.sqlite")
+
+
+def check_path_exists_with_timeout(path, timeout=2.0):
+    """Check if path exists with timeout to prevent hanging on network drives"""
+    result = [None]
+    
+    def check():
+        try:
+            result[0] = path.exists()
+        except Exception as e:
+            logger.error(f"Error checking path: {e}")
+            result[0] = False
+    
+    thread = threading.Thread(target=check, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    
+    if thread.is_alive():
+        logger.warning(f"Path check timed out after {timeout}s (likely network issue)")
+        return False
+    
+    return result[0] if result[0] is not None else False
 
 # Midnight color scheme (matching target_selector_gui.py)
 COLORS = {
@@ -61,7 +93,7 @@ class ScheduledTargetViewer:
             raise
     
     def _initialize_ui(self):
-        
+        """Initialize UI components"""
         # Configure style
         self.setup_styles()
         
@@ -225,8 +257,28 @@ class ScheduledTargetViewer:
         )
         self.status_bar.pack(fill='x', pady=(10, 0))
         
+        # Check database path before loading
+        if not check_path_exists_with_timeout(DB_PATH, timeout=2.0):
+            logger.error(f"Database not found at {DB_PATH}")
+            self.update_status(f"⚠️ Database not found: {DB_PATH}")
+            messagebox.showwarning(
+                "Database Not Found",
+                f"Database file not found:\n{DB_PATH}\n\n"
+                f"Please ensure the database exists or update the DB_PATH in the script."
+            )
+            return
+        
         # Load initial data
-        self.load_scheduled_targets()
+        try:
+            self.load_scheduled_targets()
+        except Exception as e:
+            logger.error(f"Error loading targets on startup: {e}")
+            self.update_status(f"⚠️ Error loading targets: {e}")
+            messagebox.showerror(
+                "Load Error",
+                f"Failed to load scheduled targets:\n\n{e}\n\n"
+                f"The application will continue but may not display data correctly."
+            )
         
     def setup_styles(self):
         """Configure ttk styles for midnight theme"""
@@ -249,12 +301,14 @@ class ScheduledTargetViewer:
         
     def load_scheduled_targets(self):
         """Load scheduled targets from database, sorted by date (latest first)"""
-        if not DB_PATH.exists():
+        if not check_path_exists_with_timeout(DB_PATH, timeout=2.0):
+            self.update_status(f"⚠️ Database not found: {DB_PATH}")
             messagebox.showerror("Error", f"Database not found at {DB_PATH}")
             return
             
         try:
-            conn = sqlite3.connect(DB_PATH)
+            logger.info(f"Connecting to database: {DB_PATH}")
+            conn = sqlite3.connect(DB_PATH, timeout=5.0)  # Add timeout to prevent hanging
             cursor = conn.cursor()
             
             # Query scheduled targets with observation night details
@@ -613,18 +667,48 @@ class ScheduledTargetViewer:
 
 def main():
     import traceback
+    import sys
+    
+    # Enable console output for debugging
     try:
+        # Log startup
+        logger.info("=== Scheduled Target Viewer Starting ===")
+        logger.info(f"Python version: {sys.version}")
+        logger.info(f"Database path: {DB_PATH}")
+        
+        # Check database access with timeout protection
+        logger.info("Checking database accessibility...")
+        db_exists = check_path_exists_with_timeout(DB_PATH, timeout=2.0)
+        logger.info(f"Database exists: {db_exists}")
+        
+        if not db_exists:
+            logger.warning(f"Database not accessible at {DB_PATH}")
+        
+        logger.info("Creating Tk root window...")
         root = tk.Tk()
+        logger.info("Tk root created successfully")
+        
+        logger.info("Initializing ScheduledTargetViewer...")
         app = ScheduledTargetViewer(root)
+        logger.info("ScheduledTargetViewer initialized successfully")
+        
+        logger.info("Starting main loop...")
         root.mainloop()
     except Exception as e:
         # Log the full error with traceback
-        logger.error(f"Failed to start application: {e}")
-        logger.error(traceback.format_exc())
+        error_msg = f"Failed to start application: {e}\n\n{traceback.format_exc()}"
+        logger.error(error_msg)
         
         # Also show error in message box if possible
         try:
-            messagebox.showerror("Startup Error", f"Failed to start application:\n\n{e}\n\nSee console for details.")
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "Startup Error", 
+                f"Failed to start Scheduled Target Viewer:\n\n{e}\n\n"
+                f"See log file for details."
+            )
+            root.destroy()
         except:
             print(f"FATAL ERROR: {e}")
             print(traceback.format_exc())
