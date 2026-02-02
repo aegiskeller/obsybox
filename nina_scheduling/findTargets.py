@@ -96,7 +96,7 @@ USERNAME = VARASTRO_USERNAME
 PASSWORD = VARASTRO_PASSWORD
 
 # NINA template configuration
-NINA_TEMPLATE_FILE = "varstar.template.json"  # Template file for NINA JSON generation (relative to script directory)
+NINA_TEMPLATE_FILE = "VarStarS50.template.json"  # Template file for NINA JSON generation (relative to script directory)
 # check if the template file exists
 template_path = Path(__file__).parent / NINA_TEMPLATE_FILE
 if not template_path.exists():
