@@ -6,7 +6,7 @@
 #include <Ticker.h>  // For ESP8266 watchdog
 
 // --- Add min/max values for plotting ---
-float tmin = 0, tmax = 40;      // Temperature range (°C)
+float tmin = 0, tmax = 60;      // Temperature range (°C)
 float hmin = 0, hmax = 100;     // Humidity range (%)
 float amin = 0, amax = 1023;    // Anemometer ADC range
 

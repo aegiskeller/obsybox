@@ -1,0 +1,38 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ArduSafeMon", "ArduSafeMon", "{3E592171-E426-BDC1-89E5-17B946808396}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "obsySwitch", "obsySwitch", "{2C625FCF-8C73-2CD3-1E37-356765C55EBE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ArduSafeMon", "ArduSafeMon\ascomDriver\ArduSafeMon.csproj", "{AEDD9666-C57C-81CC-4262-4878092D6DF2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ObsyBoxRelaySwitch", "obsySwitch\ascomDriver\ObsyBoxRelaySwitch.csproj", "{35D9846D-7960-0692-FDEF-35030AFA3EB2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{AEDD9666-C57C-81CC-4262-4878092D6DF2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AEDD9666-C57C-81CC-4262-4878092D6DF2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AEDD9666-C57C-81CC-4262-4878092D6DF2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AEDD9666-C57C-81CC-4262-4878092D6DF2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{35D9846D-7960-0692-FDEF-35030AFA3EB2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{35D9846D-7960-0692-FDEF-35030AFA3EB2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{35D9846D-7960-0692-FDEF-35030AFA3EB2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{35D9846D-7960-0692-FDEF-35030AFA3EB2}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{AEDD9666-C57C-81CC-4262-4878092D6DF2} = {3E592171-E426-BDC1-89E5-17B946808396}
+		{35D9846D-7960-0692-FDEF-35030AFA3EB2} = {2C625FCF-8C73-2CD3-1E37-356765C55EBE}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {9DD6887B-C2BE-46AB-BDFB-4878913C7AF5}
+	EndGlobalSection
+EndGlobal
