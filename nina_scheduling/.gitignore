@@ -22,3 +22,4 @@ venv
 LogArchive
 data_scan.py
 targets/
+check*.py

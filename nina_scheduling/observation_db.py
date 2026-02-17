@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ObservationDB:
     """Database manager for astronomical observations"""
     
-    def __init__(self, db_path: str = "observations.sqlite"):
+    def __init__(self, db_path: str = "Z:/scheduled_observations.sqlite"):
         """Initialize database connection
         
         Args:
@@ -470,7 +470,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Observation Database Manager')
-    parser.add_argument('--db', default='observations.sqlite', help='Database path')
+    parser.add_argument('--db', default='Z:/scheduled_observations.sqlite', help='Database path')
     parser.add_argument('--init', action='store_true', help='Initialize database')
     parser.add_argument('--scan', type=str, help='Scan base path for LIGHT directories')
     parser.add_argument('--telescope', default='SCT', help='Telescope name')

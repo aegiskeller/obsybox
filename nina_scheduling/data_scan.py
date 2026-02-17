@@ -53,7 +53,7 @@ def parse_args():
     p.add_argument('--mode', choices=('light', 'seestar', 'both'), default='both', help='Which scans to run')
     p.add_argument('--base-path', default='D:\\', help='Base path to scan for LIGHT (default D:\\)')
     p.add_argument('--seestar-path', default='D:\\Seestar', help='Path to scan for Seestar date folders (default D:\\Seestar)')
-    p.add_argument('--db', default='observations.sqlite', help='SQLite DB path')
+    p.add_argument('--db', default='Z:/scheduled_observations.sqlite', help='SQLite DB path')
     p.add_argument('--dry-run', action='store_true', help='Do not write to DB; show actions')
     p.add_argument('--verbose', action='store_true')
     p.add_argument('--strip-sub-suffix', action='store_true', default=True,

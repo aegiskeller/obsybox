@@ -57,7 +57,7 @@ This will:
 You can also manually mark targets as scheduled using Python:
 
 ```python
-from parse_nina_log import mark_targets_scheduled
+from logexploit.database import mark_targets_scheduled
 
 # Mark targets as scheduled for a specific date
 targets = ['EG Scl', 'HX Eri', 'V* BV Cet']
@@ -79,7 +79,7 @@ print(f"Marked {marked} exposures as scheduled")
 ```bash
 # Example: Mark targets as scheduled
 python -c "
-from parse_nina_log import mark_targets_scheduled
+from logexploit.database import mark_targets_scheduled
 targets = ['EG Scl', 'HX Eri']
 marked = mark_targets_scheduled('observations.sqlite', targets, '2025-10-24', 'SCT 8-inch')
 print(f'Marked {marked} exposures as scheduled')
@@ -361,4 +361,4 @@ CREATE INDEX idx_scheduled_date ON nina_scheduled_targets(observation_date);
 - `LOG_TRACKING_README.md`: Documentation on log file tracking
 - `DATABASE_README.md`: Database schema and structure
 - `scheduled_analysis_queries.sql`: Pre-built analysis queries
-- `query_log_files.py`: Command-line tool for querying observations
+- `../logexploit/`: NINA log parser package for importing observations

@@ -110,8 +110,8 @@ def parse_args():
     p.add_argument('--base-path', default='D:\\', help='Base path to scan (default: D:\\)')
     
     # Database options (primary usage)
-    p.add_argument('--db', default='observations.sqlite', 
-                   help='Path to SQLite database (default: observations.sqlite)')
+    p.add_argument('--db', default='Z:/scheduled_observations.sqlite', 
+                   help='Path to SQLite database (default: Z:/scheduled_observations.sqlite)')
     p.add_argument('--telescope', default='SCT', 
                    help='Telescope name (default: SCT)')
     p.add_argument('--dry-run', action='store_true', 

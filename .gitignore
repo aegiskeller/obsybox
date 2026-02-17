@@ -58,3 +58,18 @@ ascom_api
 .venv
 .vs
 .vscode
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Logexploit data files (exclude actual log data and database files)
+logexploit/observing_log.db
+logexploit/reallog
+logexploit/temp_merge.db
+logexploit/zzz_logfiles/
+
+# Test directories
+logexploit/tests/

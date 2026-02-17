@@ -1111,7 +1111,19 @@ class TargetSelectorGUI:
                 self.targets_text.insert('end', f"  Minima (Local):    {local_time}\n")
                 self.targets_text.insert('end', f"  Obs Window:        {obs_start} - {obs_end} local\n")
             
-            self.targets_text.insert('end', f"  Magnitude Range:   {target.get('mag_min', 'N/A')} - {target.get('mag_max', 'N/A')}\n")
+            # Format magnitude range, handling missing/invalid mag_min
+            mag_min = target.get('mag_min', 'N/A')
+            mag_max = target.get('mag_max', 'N/A')
+            try:
+                # If mag_min is 0 or very small (invalid), show only mag_max
+                if mag_min != 'N/A' and (float(mag_min) < 0.1 or mag_min == 0):
+                    mag_display = f"{mag_max} (max)"
+                else:
+                    mag_display = f"{mag_min} - {mag_max}"
+            except (ValueError, TypeError):
+                mag_display = f"{mag_min} - {mag_max}"
+            
+            self.targets_text.insert('end', f"  Magnitude Range:   {mag_display}\n")
             self.targets_text.insert('end', f"  Altitude:          {target.get('altitude', 'N/A')}°\n")
             self.targets_text.insert('end', f"  Azimuth:           {target.get('azimuth', 'N/A')}\n")
             self.targets_text.insert('end', f"  Type:              {target.get('variability_type', 'N/A')}\n")
@@ -1386,10 +1398,8 @@ class TargetSelectorGUI:
     
     def get_export_path_display(self):
         """Get the current export path for display in the GUI"""
-        from datetime import date
-        today = date.today()
-        date_str = today.strftime('%Y%m%d')
-        full_path = Path(NINA_EXPORT_BASE_DIR) / date_str
+        telescope = self.telescope_var.get() if hasattr(self, 'telescope_var') else 'SCT'
+        full_path = Path(NINA_EXPORT_BASE_DIR) / telescope
         return str(full_path)
     
     def update_export_path_display(self):
@@ -1417,34 +1427,27 @@ class TargetSelectorGUI:
                 # Continue with export even if database recording fails
             
             # Get the configured export path from the GUI entry
-            base_export_path = self.nina_export_base_dir_entry.get().strip()
-            if not base_export_path:
-                base_export_path = str(NINA_EXPORT_BASE_DIR)  # Fallback to default
-            
-            # Append telescope name if configured
+            # Get telescope selection
             telescope = self.telescope_var.get()
-            if telescope and telescope.strip():
-                telescope_suffix = telescope.strip()
-                if telescope_suffix == "S50":
-                    base_export_path = str(Path(base_export_path) / "S50")
-                else:
-                    base_export_path = str(Path(base_export_path) / telescope_suffix)
+            if not telescope or not telescope.strip():
+                telescope = "SCT"  # Default to SCT if no telescope selected
             
-            # Create date-based subdirectory
-            today = date.today()
-            date_str = today.strftime('%Y%m%d')
-            output_dir = Path(base_export_path) / date_str
+            # Let export_to_nina_json build the full path structure: path/VarStars/<telescope>/<date>
+            # Pass None for output_dir to use the default path construction
+            created_files = export_to_nina_json(self.selected_targets, output_dir=None, telescope=telescope)
             
-            # Export NINA JSON files with custom path and telescope selection
-            export_to_nina_json(self.selected_targets, output_dir=output_dir, telescope=telescope)
-            
-            self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
-            messagebox.showinfo(
-                "Export Successful",
-                f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
-                f"{output_dir}\n\n"
-                f"Targets have been recorded in the database."
-            )
+            if created_files:
+                output_dir = created_files[0].parent if created_files else "unknown"
+                self.log_message(f"Exported {len(self.selected_targets)} NINA JSON files to {output_dir}", 'success')
+                messagebox.showinfo(
+                    "Export Successful",
+                    f"Successfully exported {len(self.selected_targets)} NINA JSON files to:\n"
+                    f"{output_dir}\n\n"
+                    f"Targets have been recorded in the database."
+                )
+            else:
+                self.log_message("Export failed - no files created", 'error')
+                messagebox.showerror("Export Error", "No files were created during export")
         except Exception as e:
             self.log_message(f"Export failed: {str(e)}", 'error')
             messagebox.showerror("Export Error", f"Failed to export NINA JSON:\n{str(e)}")
