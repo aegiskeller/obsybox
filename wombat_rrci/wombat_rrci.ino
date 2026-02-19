@@ -129,45 +129,46 @@ void loop() {
     serialin = ""; 
   }
  
-  if (serialin == "get") { // exteranl query  command to fetch RRCI data
+  if (serialin == "get") { // external query command to fetch RRCI data
     str = ""; // Clear at the start
+    
+    // Read sensor states once to avoid inconsistency
+    bool isOpened = (digitalRead(opened) == LOW);
+    bool isClosed = (digitalRead(closed) == LOW);
 
-    if (digitalRead(opened) == LOW){
+    // Determine position state (first part of response)
+    if (isOpened){
       str += "opened,"; 
-          
     }
-    else if (digitalRead(closed) == LOW){
+    else if (isClosed){
       str += "closed,";
     }
-    
-    if ((digitalRead(closed) == HIGH) && (digitalRead(opened) == HIGH)){
-        str += "unknown,";
+    else {
+      str += "unknown,"; // Both sensors HIGH
     }
-
-    if ((digitalRead(closed) == HIGH)  && (digitalRead(opened) == LOW) && (lost == false)){
+    
+    // Determine movement/lost state (second part of response)
+    if (isOpened && !isClosed && !lost){
       str += "not_moving_o#";
-      end_time=millis()+60000; //reset the timer
+      end_time = millis() + ROOF_LOST_TIMEOUT; //reset the timer
     }
-    
-    if ((digitalRead(closed)  == LOW) && (digitalRead(opened) == HIGH) && (lost == false)){
+    else if (isClosed && !isOpened && !lost){
       str += "not_moving_c#";
-      end_time=millis()+60000; //reset the timer
+      end_time = millis() + ROOF_LOST_TIMEOUT; //reset the timer
     }
-    if ((digitalRead(closed)  == HIGH) && (digitalRead(opened) == HIGH) && (lost == false)){
-        str +=  "moving#";
-        
+    else if (!isClosed && !isOpened && !lost){
+      str += "moving#";
     }     
-    else if ((digitalRead(closed) == HIGH)  && (digitalRead(opened) == HIGH) && (lost == true)){   
-        str += "unknown#";
+    else if (!isClosed && !isOpened && lost){   
+      str += "lost#"; // Changed from "unknown#" to be more descriptive
     }
-    if (str.endsWith(","))  {
-      str += "unknown#";
+    else {
+      str += "error#"; // Shouldn't happen but covers edge cases
     }
   
     Serial.println(str);  //send serial data
     serialin = "";  
     str = "";
-    //delay(100);
   } // end get
 
   if (serialin == "Status"){
