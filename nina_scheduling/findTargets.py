@@ -46,6 +46,9 @@ try:
 except ImportError:
     mark_targets_scheduled = None  # Optional dependency
 
+# Import local observation database
+from observation_db import ObservationDB
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -107,6 +110,7 @@ if not template_path.exists():
 
 # Fixed parameters (not user-configurable)
 SUNSET_TIME = "20:00"  # Default sunset time LOCAL TIME
+STAR_COORDS_DB_PATH = Path("Z:/scheduled_observations.sqlite")  # Persistent star coordinate cache
 
 def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_cache: bool = True) -> List[Dict]:
     """
@@ -548,6 +552,74 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         if driver:
             driver.quit()
 
+# ---------------------------------------------------------------------------
+# Persistent star coordinate cache (avoids re-resolving the same stars nightly)
+# ---------------------------------------------------------------------------
+
+_COORDS_CACHE_DDL = """
+    CREATE TABLE IF NOT EXISTS star_coords_cache (
+        cache_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        star_name   TEXT NOT NULL UNIQUE,
+        constellation TEXT,
+        star_id     TEXT,
+        ra          TEXT NOT NULL,
+        dec         TEXT NOT NULL,
+        source      TEXT,
+        lookup_date DATE DEFAULT (date('now')),
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_star_coords_name ON star_coords_cache(star_name);
+    CREATE INDEX IF NOT EXISTS idx_star_coords_star_id ON star_coords_cache(star_id);
+"""
+
+def _cache_get_coords(star_name: str):
+    """Return (ra, dec) from the persistent DB cache, or (None, None) on miss/error."""
+    if not STAR_COORDS_DB_PATH.exists():
+        return (None, None)
+    try:
+        conn = sqlite3.connect(str(STAR_COORDS_DB_PATH))
+        conn.executescript(_COORDS_CACHE_DDL)  # no-op if table already exists
+        cur = conn.execute(
+            "SELECT ra, dec FROM star_coords_cache WHERE star_name = ?",
+            (star_name,)
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            logger.debug(f"Coord cache HIT for '{star_name}': RA={row[0]}, Dec={row[1]}")
+            return (row[0], row[1])
+    except Exception as e:
+        logger.debug(f"Coord cache read error for '{star_name}': {e}")
+    return (None, None)
+
+
+def _cache_set_coords(star_name: str, ra: str, dec: str,
+                      constellation: str = '', star_id: str = '', source: str = ''):
+    """Write (ra, dec) to the persistent DB cache; silently ignores errors."""
+    if not STAR_COORDS_DB_PATH.exists():
+        return
+    try:
+        conn = sqlite3.connect(str(STAR_COORDS_DB_PATH))
+        conn.executescript(_COORDS_CACHE_DDL)  # no-op if table already exists
+        conn.execute("""
+            INSERT INTO star_coords_cache
+                (star_name, constellation, star_id, ra, dec, source, lookup_date)
+            VALUES (?, ?, ?, ?, ?, ?, date('now'))
+            ON CONFLICT(star_name) DO UPDATE SET
+                ra          = excluded.ra,
+                dec         = excluded.dec,
+                source      = excluded.source,
+                lookup_date = date('now')
+        """, (star_name, constellation, star_id, ra, dec, source))
+        conn.commit()
+        conn.close()
+        logger.debug(f"Coord cache written for '{star_name}' (source={source})")
+    except Exception as e:
+        logger.debug(f"Coord cache write error for '{star_name}': {e}")
+
+
+# ---------------------------------------------------------------------------
+
 def enrich_targets_with_coordinates(targets: List[Dict], driver=None, max_workers: int = 5) -> List[Dict]:
     """
     Enrich targets with RA/Dec coordinates by looking them up from SIMBAD or var.astro.cz
@@ -565,6 +637,7 @@ def enrich_targets_with_coordinates(targets: List[Dict], driver=None, max_worker
     stats = {
         'total': len(targets),
         'already_had_coords': 0,
+        'db_cache_hit': 0,
         'simbad_success': 0,
         'varastro_success': 0,
         'lookup_failed': 0
@@ -574,58 +647,79 @@ def enrich_targets_with_coordinates(targets: List[Dict], driver=None, max_worker
     completed_count = [0]  # Use list to allow modification in nested function
     
     def lookup_single_target(index_and_target):
-        """Lookup coordinates for a single target (thread-safe)"""
+        """Lookup coordinates for a single target (thread-safe).
+
+        Resolution order:
+          1. Already present in the target dict (from the per-night cache/scrape)
+          2. Persistent DB coordinate cache  (star_coords_cache table)
+          3. SIMBAD (named variables)
+          4. var.astro.cz star page (G-catalog & fallback)
+        """
         i, target = index_and_target
         ra = target.get('ra', '').strip()
         dec = target.get('dec', '').strip()
-        
-        # Skip if already has coordinates
+
+        # 1. Skip if the target dict already carries coordinates
         if ra and dec:
             with stats_lock:
                 stats['already_had_coords'] += 1
             return target
-        
+
         star_name = target.get('name', '')
         constellation = target.get('constellation', '')
         star_id = target.get('id', '')
-        
-        # G catalog stars - go directly to var.astro.cz
+
+        # 2. Check the persistent DB coordinate cache first (fast, no network)
+        ra_cached, dec_cached = _cache_get_coords(star_name)
+        if ra_cached and dec_cached:
+            target['ra'] = ra_cached
+            target['dec'] = dec_cached
+            with stats_lock:
+                stats['db_cache_hit'] += 1
+            return target
+
+        # 3a. G catalog stars - resolve via var.astro.cz
         if star_name.startswith('G') and star_id:
-            ra_new, dec_new = fetch_coordinates_from_varastro(star_id, driver=None)  # Each thread creates its own driver
-            
+            ra_new, dec_new = fetch_coordinates_from_varastro(star_id, driver=None)
             if ra_new and dec_new:
                 target['ra'] = ra_new
                 target['dec'] = dec_new
+                _cache_set_coords(star_name, ra_new, dec_new,
+                                  constellation=constellation, star_id=star_id,
+                                  source='varastro')
                 with stats_lock:
                     stats['varastro_success'] += 1
-                return target
             else:
                 with stats_lock:
                     stats['lookup_failed'] += 1
-                return target
-        
-        # Try SIMBAD first for non-G catalog stars
+            return target
+
+        # 3b. Try SIMBAD first for non-G catalog stars
         ra_new, dec_new = lookup_coordinates_simbad(star_name, constellation)
-        
         if ra_new and dec_new:
             target['ra'] = ra_new
             target['dec'] = dec_new
+            _cache_set_coords(star_name, ra_new, dec_new,
+                              constellation=constellation, star_id=star_id,
+                              source='simbad')
             with stats_lock:
                 stats['simbad_success'] += 1
             return target
-        
-        # If SIMBAD failed, try var.astro.cz
+
+        # 4. SIMBAD failed - fall back to var.astro.cz
         if star_id:
             ra_new, dec_new = fetch_coordinates_from_varastro(star_id, driver=None)
-            
             if ra_new and dec_new:
                 target['ra'] = ra_new
                 target['dec'] = dec_new
+                _cache_set_coords(star_name, ra_new, dec_new,
+                                  constellation=constellation, star_id=star_id,
+                                  source='varastro')
                 with stats_lock:
                     stats['varastro_success'] += 1
                 return target
-        
-        # Could not resolve coordinates
+
+        # Could not resolve coordinates by any method
         with stats_lock:
             stats['lookup_failed'] += 1
         return target
@@ -685,6 +779,7 @@ def enrich_targets_with_coordinates(targets: List[Dict], driver=None, max_worker
     
     logger.info(f"Coordinate enrichment complete: "
                 f"{stats['already_had_coords']} already had coords, "
+                f"{stats['db_cache_hit']} from DB cache, "
                 f"{stats['simbad_success']} from SIMBAD, "
                 f"{stats['varastro_success']} from var.astro.cz, "
                 f"{stats['lookup_failed']} failed")
@@ -2878,50 +2973,80 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
         targets: List of target dictionaries with 'name', 'ra', 'dec', etc.
         observation_date: Date targets are scheduled for
         db_path: Path to database (optional, uses default if not specified)
-        telescope: Telescope name (optional, defaults to 'SCT')
+        telescope: Telescope name (optional, defaults to 'SCT 8-inch')
     """
-    if mark_targets_scheduled is None:
-        logger.warning("parse_nina_log module not available, skipping database recording")
-        return
-    
     if db_path is None:
-        # Use default database on Z: drive
         db_path = Path("Z:/scheduled_observations.sqlite")
         logger.info(f"Using database: {db_path}")
-    
-    # DEBUG: Log the incoming telescope parameter
-    logger.info(f"record_scheduled_targets called with telescope='{telescope}' (type: {type(telescope).__name__})")
-    
+
     if telescope is None:
-        telescope = "SCT 8-inch"  # Default telescope
-        logger.info(f"Telescope was None, using default: {telescope}")
-    
+        telescope = "SCT 8-inch"
+
+    logger.info(f"record_scheduled_targets called with telescope='{telescope}' for {len(targets)} target(s)")
+
     # Check if any targets have already been observed or scheduled
     already_observed, already_scheduled = check_already_observed(targets, observation_date, db_path)
-    
+
     if already_observed or already_scheduled:
         total_issues = len(already_observed) + len(already_scheduled)
         logger.warning(f"{total_issues} target(s) already observed or scheduled on {observation_date}")
-        
-        # Ask user if they want to proceed
+
         if not prompt_user_confirmation(already_observed, already_scheduled, observation_date):
             logger.info("User cancelled scheduling of already-observed/scheduled targets")
             return
         else:
             logger.info("User confirmed to proceed with scheduling")
-    
-    # Pass full target dictionaries (not just names) to preserve metadata
+
     obs_date_str = observation_date.strftime('%Y-%m-%d')
-    
+
     try:
-        # Note: We pass None for sequence_file_path here since files haven't been created yet
-        # The sequence records will be created with just the target name
-        marked = mark_targets_scheduled(db_path, targets, obs_date_str, telescope, sequence_file_path=None)
-        if marked > 0:
-            logger.info(f"Created {marked} scheduled_targets records in database")
-        logger.info(f"Recorded {len(targets)} targets as scheduled for {obs_date_str}")
+        db = ObservationDB(str(db_path))
+        night_id = db.add_night(obs_date_str, telescope=telescope)
+
+        marked = 0
+        for target in targets:
+            target_name = target.get('name', target.get('Star', 'Unknown'))
+
+            # Upsert the target record
+            target_id = db.add_target(
+                target_name,
+                target_type='variable_star',
+                constellation=target.get('constellation') or None,
+                magnitude_max=target.get('mag_max') or None,
+                magnitude_min=target.get('mag_min') or None,
+                variability_type=target.get('variability_type') or None,
+            )
+
+            # Resolve minima time to an ISO string if available
+            minima_dt = target.get('minima_datetime_utc') or None
+            if minima_dt is None:
+                raw_min = target.get('minimum_time', '')
+                if raw_min:
+                    try:
+                        minima_dt = parse_minima_time(raw_min)
+                    except Exception:
+                        minima_dt = None
+            minima_iso = minima_dt.isoformat() if minima_dt else None
+
+            start_dt = (minima_dt - timedelta(hours=2)) if minima_dt else None
+            end_dt   = (minima_dt + timedelta(hours=2)) if minima_dt else None
+
+            db.schedule_target(
+                night_id=night_id,
+                target_id=target_id,
+                scheduled_start_time=start_dt.isoformat() if start_dt else None,
+                scheduled_end_time=end_dt.isoformat() if end_dt else None,
+                minima_time=minima_iso,
+                observation_window_hours=OBSERVATION_WINDOW,
+                status='scheduled',
+            )
+            marked += 1
+            logger.info(f"Scheduled {target_name} for {obs_date_str}")
+
+        logger.info(f"Created {marked} scheduled_targets record(s) in database for {obs_date_str}")
     except Exception as e:
-        logger.warning(f"Could not record scheduled targets in database: {e}")
+        logger.error(f"Could not record scheduled targets in database: {e}")
+        raise
     
 
 if __name__ == "__main__":

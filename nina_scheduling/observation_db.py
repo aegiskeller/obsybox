@@ -428,6 +428,56 @@ class ObservationDB:
         return stats
     
     # ========================================================================
+    # STAR COORDINATE CACHE
+    # ========================================================================
+
+    def get_star_coords(self, star_name: str) -> Optional[Tuple[str, str]]:
+        """Retrieve cached RA/Dec coordinates for a star.
+
+        Args:
+            star_name: Full star name as stored in predictions (e.g., "EH Cnc", "G5341.00974")
+
+        Returns:
+            Tuple of (ra, dec) strings, or None if not cached.
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT ra, dec FROM star_coords_cache WHERE star_name = ?",
+                (star_name,)
+            )
+            row = cur.fetchone()
+            return (row['ra'], row['dec']) if row else None
+
+    def set_star_coords(self, star_name: str, ra: str, dec: str,
+                        constellation: str = '', star_id: str = '',
+                        source: str = '') -> None:
+        """Store RA/Dec coordinates for a star in the persistent cache.
+
+        Uses an upsert so that repeated lookups overwrite stale entries while
+        preserving the original created_at timestamp.
+
+        Args:
+            star_name: Full star name (unique cache key)
+            ra: RA string in HH:MM:SS.SS format
+            dec: Dec string in ±DD:MM:SS.S format
+            constellation: Constellation abbreviation
+            star_id: var.astro.cz numeric ID (for G-stars)
+            source: Lookup source ('simbad' or 'varastro')
+        """
+        with self.get_connection() as conn:
+            conn.execute("""
+                INSERT INTO star_coords_cache
+                    (star_name, constellation, star_id, ra, dec, source, lookup_date)
+                VALUES (?, ?, ?, ?, ?, ?, date('now'))
+                ON CONFLICT(star_name) DO UPDATE SET
+                    ra          = excluded.ra,
+                    dec         = excluded.dec,
+                    source      = excluded.source,
+                    lookup_date = date('now')
+            """, (star_name, constellation, star_id, ra, dec, source))
+
+    # ========================================================================
     # QUERIES AND REPORTS
     # ========================================================================
     

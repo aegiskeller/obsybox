@@ -274,6 +274,25 @@ CREATE INDEX IF NOT EXISTS idx_metadata_obs ON observation_metadata(observation_
 CREATE INDEX IF NOT EXISTS idx_photometry_obs ON photometry(observation_id);
 
 -- ============================================================================
+-- STAR COORDS CACHE: Persistent RA/Dec coordinate cache for variable stars
+-- Avoids repeated SIMBAD/var.astro.cz lookups for the same targets each night
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS star_coords_cache (
+    cache_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    star_name TEXT NOT NULL UNIQUE,       -- Full combined name used in predictions (e.g., "EH Cnc", "G5341.00974")
+    constellation TEXT,                    -- Constellation abbreviation (e.g., "Cnc")
+    star_id TEXT,                          -- var.astro.cz numeric ID (primarily for G-stars)
+    ra TEXT NOT NULL,                      -- RA in HH:MM:SS.SS format
+    dec TEXT NOT NULL,                     -- Dec in ±DD:MM:SS.S format
+    source TEXT,                           -- 'simbad' or 'varastro'
+    lookup_date DATE DEFAULT (date('now')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_star_coords_name ON star_coords_cache(star_name);
+CREATE INDEX IF NOT EXISTS idx_star_coords_star_id ON star_coords_cache(star_id);
+
+-- ============================================================================
 -- VIEWS for common queries
 -- ============================================================================
 
