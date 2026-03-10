@@ -6,7 +6,7 @@
 #include <Ticker.h>  // For ESP8266 watchdog
 
 // --- Add min/max values for plotting ---
-float tmin = 0, tmax = 40;      // Temperature range (°C)
+float tmin = 0, tmax = 60;      // Temperature range (°C)
 float hmin = 0, hmax = 100;     // Humidity range (%)
 float amin = 0, amax = 1023;    // Anemometer ADC range
 
@@ -21,18 +21,7 @@ int consecutiveFailures = 0;
 const int MAX_CONSECUTIVE_FAILURES = 5;
 
 #include "arduino_secrets.h"
-// WiFi credentials - support multiple networks
-struct WiFiNetwork {
-  const char* ssid;
-  const char* password;
-};
-
-WiFiNetwork wifiNetworks[] = {
-  {SECRET_SSID_1, SECRET_PASS_1},
-  {SECRET_SSID_2, SECRET_PASS_2},
-  {SECRET_SSID_3, SECRET_PASS_3}
-};
-const int numNetworks = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
+// WiFi credentials
 String connectedSSID = "";
 
 // MQTT settings
@@ -78,7 +67,7 @@ const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
 
 // Watchdog variables
 Ticker watchdogTicker;
-const int WATCHDOG_TIMEOUT = 60; // seconds
+const int WATCHDOG_TIMEOUT = 120; // seconds - increased to handle DHT failures and retries
 unsigned long lastWatchdogReset = 0;
 bool watchdogEnabled = false;
 
@@ -212,7 +201,7 @@ void handleRoot() {
         Data sampled every minute, displayed in real-time.<br>
         Last updated: )rawliteral" + String(millis() / 1000) + R"rawliteral( seconds ago.<br>
         )rawliteral" + modeInfo + R"rawliteral(<br>
-        Firmware: 1.0.0, History: 60 min, 100 samples/min.<br>
+        Firmware: 1.2.0, History: 60 min, 25 samples/min.<br>
         Charts below show the last 60 minutes of data.
       </em>
     </div>
@@ -327,71 +316,28 @@ void setup() {
     anemometerHistory[i] = NAN;
   }
 
-  // Scan for available networks and connect to strongest
+  // Connect to WiFi
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
   
-  Serial.println("Scanning for WiFi networks...");
-  int n = WiFi.scanNetworks();
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(SECRET_SSID);
   
-  int bestNetwork = -1;
-  int bestRSSI = -100;
+  WiFi.config(staticIP, gateway, subnet);
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  connectedSSID = String(SECRET_SSID);
   
-  if (n > 0) {
-    Serial.print(n);
-    Serial.println(" networks found");
-    
-    // Check each scanned network against our known networks
-    for (int i = 0; i < n; i++) {
-      String scannedSSID = WiFi.SSID(i);
-      int rssi = WiFi.RSSI(i);
-      
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.print(scannedSSID);
-      Serial.print(" (");
-      Serial.print(rssi);
-      Serial.println(" dBm)");
-      
-      // Check if this is one of our configured networks
-      for (int j = 0; j < numNetworks; j++) {
-        if (scannedSSID == String(wifiNetworks[j].ssid)) {
-          if (rssi > bestRSSI) {
-            bestRSSI = rssi;
-            bestNetwork = j;
-          }
-        }
-      }
+  unsigned long wifiStartTime = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStartTime > 30000) { // 30 second timeout
+      Serial.println("\nWiFi connection timeout. Starting Access Point mode...");
+      apMode = true;
+      break;
     }
-  }
-  
-  // Try to connect to the best network found
-  if (bestNetwork >= 0) {
-    Serial.print("Connecting to strongest network: ");
-    Serial.print(wifiNetworks[bestNetwork].ssid);
-    Serial.print(" (");
-    Serial.print(bestRSSI);
-    Serial.println(" dBm)");
-    
-    WiFi.config(staticIP, gateway, subnet);
-    WiFi.begin(wifiNetworks[bestNetwork].ssid, wifiNetworks[bestNetwork].password);
-    connectedSSID = String(wifiNetworks[bestNetwork].ssid);
-    
-    unsigned long wifiStartTime = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-      if (millis() - wifiStartTime > 300000) { // 5 minute timeout
-        Serial.println("\nWiFi connection timeout. Starting Access Point mode...");
-        apMode = true;
-        break;
-      }
-      delay(500);
-      Serial.print(".");
-      yield(); // Feed the ESP8266 watchdog
-    }
-  } else {
-    Serial.println("No known networks found. Starting Access Point mode...");
-    apMode = true;
+    delay(500);
+    Serial.print(".");
+    yield(); // Feed the ESP8266 watchdog
   }
 
   // Enable watchdog timer BEFORE starting AP/Station mode
@@ -465,7 +411,7 @@ void loop() {
   static float temperatureSum = 0;
   static int anemometerSum = 0;
   static int validSamples = 0;
-  static const int NUM_SAMPLES = 100;
+  static const int NUM_SAMPLES = 25; // Reduced from 100 to fit in 60-second cycle (25 * 2.1s = 52.5s)
   static unsigned long lastSampleInterval = 0;
   static unsigned long lastMqttPublish = 0;
 
@@ -476,6 +422,7 @@ void loop() {
   if (now - lastDebugPrint >= 10000 || lastDebugPrint == 0) {
     float h, t;
     bool success = readDHTWithRetry(t, h, 2);
+    feedWatchdog(); // Feed after potentially slow sensor read
     int a = analogRead(ANEMOMETER_PIN);
     Serial.print("[DEBUG] Raw Sensor Readings - Temp: ");
     Serial.print(success ? String(t, 2) : "NaN");
@@ -517,6 +464,11 @@ void loop() {
     }
     sampleCount++;
     lastSampleInterval = now;
+    
+    // Feed watchdog every 10 samples to prevent timeout during long sampling cycles
+    if (sampleCount % 10 == 0) {
+      feedWatchdog();
+    }
   }
 
   // When enough samples have been taken, calculate averages and store
@@ -555,6 +507,8 @@ void loop() {
     Serial.print("/");
     Serial.print(NUM_SAMPLES);
     Serial.println("]");
+    
+    feedWatchdog(); // Feed before MQTT publish
 
     // --- MQTT publish every minute (after averaging) - only in Station mode ---
     if (!apMode && mqttClient.connected() && validSamples >= NUM_SAMPLES / 2) {

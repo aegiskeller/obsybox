@@ -2878,7 +2878,7 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
         targets: List of target dictionaries with 'name', 'ra', 'dec', etc.
         observation_date: Date targets are scheduled for
         db_path: Path to database (optional, uses default if not specified)
-        telescope: Telescope name (optional, defaults to 'SCT 8-inch')
+        telescope: Telescope name (optional, defaults to 'SCT')
     """
     if mark_targets_scheduled is None:
         logger.warning("parse_nina_log module not available, skipping database recording")

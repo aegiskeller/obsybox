@@ -204,13 +204,16 @@ def parse_date_dirname(name: str):
     return None
 
 
-def find_light_subdirs_recursive(path: Path, strip_sub_suffix: bool = True, results=None, depth=0, max_depth=5):
+def find_light_subdirs_recursive(path: Path, strip_sub_suffix: bool = True, results=None, depth=0, max_depth=5, existing_nights=None):
     """Recursively scan for date-named directories containing frame type folders.
     Scans FITS files in LIGHT, FLAT, BIAS, DARK directories.
     Returns list of dicts: {target, dateobs, telescope, frame_type, filter, file_path, file_name, exptime, binning, ...}
     """
     if results is None:
         results = []
+    
+    if existing_nights is None:
+        existing_nights = set()
     
     if depth > max_depth:
         return results
@@ -228,6 +231,11 @@ def find_light_subdirs_recursive(path: Path, strip_sub_suffix: bool = True, resu
             
             # Parse date from directory name
             dateobs = parse_date_dirname(child.name)
+            
+            # Skip if this night already exists in database
+            if dateobs and (dateobs, 'SCT') in existing_nights:
+                logging.info(f'Skipping {dateobs} (SCT) - already in database')
+                continue
             
             # Scan each frame type directory
             for frame_type in frame_types:
@@ -285,7 +293,7 @@ def find_light_subdirs_recursive(path: Path, strip_sub_suffix: bool = True, resu
             
             # Check if this is a date-formatted directory - recurse into it
             if dateobs:
-                find_light_subdirs_recursive(child, strip_sub_suffix, results, depth + 1, max_depth)
+                find_light_subdirs_recursive(child, strip_sub_suffix, results, depth + 1, max_depth, existing_nights)
     
     except Exception as e:
         logging.warning('Failed scanning %s: %s', path, e)
@@ -293,7 +301,7 @@ def find_light_subdirs_recursive(path: Path, strip_sub_suffix: bool = True, resu
     return results
 
 
-def find_light_subdirs(base_path: Path, strip_sub_suffix: bool = True):
+def find_light_subdirs(base_path: Path, strip_sub_suffix: bool = True, existing_nights=None):
     """Scan base_path recursively for date-named directories with LIGHT folders.
     Returns list of dicts: {target, dateobs, telescope, source_path}
     """
@@ -302,7 +310,7 @@ def find_light_subdirs(base_path: Path, strip_sub_suffix: bool = True):
         logging.warning('Base path %s missing or not a dir', base_path)
         return results
     
-    return find_light_subdirs_recursive(base_path, strip_sub_suffix)
+    return find_light_subdirs_recursive(base_path, strip_sub_suffix, existing_nights=existing_nights)
 
 
 def clean_target_name(name: str) -> str:
@@ -317,7 +325,7 @@ def clean_target_name(name: str) -> str:
     return name
 
 
-def scan_seestar_recursive(path: Path, strip_sub_suffix: bool = True, results=None, depth=0, max_depth=5):
+def scan_seestar_recursive(path: Path, strip_sub_suffix: bool = True, results=None, depth=0, max_depth=5, existing_nights=None):
     """Recursively scan for date-named directories containing target subdirectories.
     Also looks inside LIGHT, FLAT, BIAS, DARK subdirectories for frames.
     Scans FITS files and extracts header information.
@@ -325,6 +333,9 @@ def scan_seestar_recursive(path: Path, strip_sub_suffix: bool = True, results=No
     """
     if results is None:
         results = []
+    
+    if existing_nights is None:
+        existing_nights = set()
     
     if depth > max_depth:
         return results
@@ -344,6 +355,11 @@ def scan_seestar_recursive(path: Path, strip_sub_suffix: bool = True, results=No
             dateobs = parse_date_dirname(child.name)
             
             if dateobs:
+                # Skip if this night already exists in database
+                if (dateobs, 'S50') in existing_nights:
+                    logging.info(f'Skipping {dateobs} (S50) - already in database')
+                    continue
+                
                 # This is a date directory - check for frame type subfolders
                 found_frame_dir = False
                 
@@ -429,7 +445,7 @@ def scan_seestar_recursive(path: Path, strip_sub_suffix: bool = True, results=No
                         logging.warning('Failed listing Seestar date dir %s: %s', child, e)
                 
                 # Also recurse into date directories (for nested date structures)
-                scan_seestar_recursive(child, strip_sub_suffix, results, depth + 1, max_depth)
+                scan_seestar_recursive(child, strip_sub_suffix, results, depth + 1, max_depth, existing_nights)
     
     except Exception as e:
         logging.warning('Failed scanning %s: %s', path, e)
@@ -437,7 +453,7 @@ def scan_seestar_recursive(path: Path, strip_sub_suffix: bool = True, results=No
     return results
 
 
-def scan_seestar(seestar_path: Path, strip_sub_suffix: bool = True):
+def scan_seestar(seestar_path: Path, strip_sub_suffix: bool = True, existing_nights=None):
     """Scan Seestar path recursively for date-formatted directories.
     Returns list of dicts: {target, dateobs, telescope, source_path}
     """
@@ -446,7 +462,7 @@ def scan_seestar(seestar_path: Path, strip_sub_suffix: bool = True):
         logging.warning('Seestar path %s missing or not a dir', seestar_path)
         return results
     
-    return scan_seestar_recursive(seestar_path, strip_sub_suffix)
+    return scan_seestar_recursive(seestar_path, strip_sub_suffix, existing_nights=existing_nights)
 
 
 def get_or_create_target(cur, target_name):
@@ -695,12 +711,26 @@ def main():
     dbp = Path(args.db)
     all_rows = []
     
+    # Connect to database to check for existing nights
+    conn = sqlite3.connect(str(dbp))
+    cur = conn.cursor()
+    cur.execute('SELECT date_obs, telescope FROM observation_nights')
+    existing_nights = set(cur.fetchall())
+    conn.close()
+    
+    logging.info(f'Found {len(existing_nights)} existing observation nights in database')
+    
     # If --date-dir is specified, scan just that directory
     if args.date_dir:
         date_path = Path(args.date_dir)
         logging.info('Running direct scan of date directory: %s', date_path)
         # Extract date from directory name for metadata
         dateobs = parse_date_dirname(date_path.name)
+        
+        # Check if this night already exists
+        if (dateobs, 'SCT') in existing_nights:
+            logging.info(f'Skipping {dateobs} (SCT) - already in database')
+            return
         
         # Scan frame type directories directly
         frame_types = ['LIGHT', 'FLAT', 'BIAS', 'DARK']
@@ -782,12 +812,12 @@ def main():
         if args.mode in ('light', 'both'):
             bp = Path(args.base_path)
             logging.info('Running LIGHT scan under %s', bp)
-            all_rows.extend(find_light_subdirs(bp, strip_sub_suffix=args.strip_sub_suffix))
+            all_rows.extend(find_light_subdirs(bp, strip_sub_suffix=args.strip_sub_suffix, existing_nights=existing_nights))
         
         if args.mode in ('seestar', 'both'):
             sp = Path(args.seestar_path)
             logging.info('Running Seestar scan under %s', sp)
-            all_rows.extend(scan_seestar(sp, strip_sub_suffix=args.strip_sub_suffix))
+            all_rows.extend(scan_seestar(sp, strip_sub_suffix=args.strip_sub_suffix, existing_nights=existing_nights))
     
     logging.info('Total candidates found: %d', len(all_rows))
     process_rows(all_rows, dbp, dry_run=args.dry_run)
