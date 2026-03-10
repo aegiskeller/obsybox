@@ -421,7 +421,12 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
                     # WDS targets start with 'G' followed by numbers
                     if star_name and not star_name.startswith('G'):
                         # Named variable: combine name and constellation (e.g., "CH" + "Scl" = "CH Scl")
-                        full_name = f"{star_name} {constellation}" if constellation else star_name
+                        # But check first if the constellation is already part of the name
+                        # (some entries show "EH Cnc" in the name column with "Cnc" in constellation)
+                        if constellation and not star_name.strip().lower().endswith(constellation.strip().lower()):
+                            full_name = f"{star_name} {constellation}"
+                        else:
+                            full_name = star_name
                     else:
                         # WDS catalog target: keep as-is (e.g., "G1234.56789")
                         full_name = star_name
@@ -1166,6 +1171,15 @@ def lookup_coordinates_simbad(star_name: str, constellation: str = '') -> tuple:
         # Build query name - try multiple strategies
         query_names = []
         
+        # Guard against doubled constellation suffix (e.g., "EH Cnc Cnc" -> "EH Cnc")
+        # This can happen if the scraper already combined name+constellation and then
+        # the caller tries to append the constellation again.
+        if constellation:
+            double_suffix = f" {constellation} {constellation}"
+            if star_name.strip().lower().endswith(f"{constellation.lower()} {constellation.lower()}"):
+                star_name = star_name.strip()[: -len(f" {constellation}")].strip()
+                logger.debug(f"Removed duplicate constellation suffix: now '{star_name}'")
+
         # Remove constellation suffix for survey stars with coordinate-based names
         # e.g., "ASAS  J042851-4035.3 Cae" -> "ASAS  J042851-4035.3"
         # But keep constellation for traditional variable stars like "V1123 Tau", "RS Col"
