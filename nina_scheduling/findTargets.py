@@ -3007,10 +3007,45 @@ def record_scheduled_targets(targets: List[Dict], observation_date: date, db_pat
         for target in targets:
             target_name = target.get('name', target.get('Star', 'Unknown'))
 
+            # Parse RA string (HH:MM:SS.SS) into components
+            ra_str = target.get('ra', '') or ''
+            ra_hours = ra_minutes = ra_seconds = None
+            if ra_str.strip():
+                ra_parts = ra_str.strip().split(':')
+                try:
+                    ra_hours   = int(ra_parts[0]) if len(ra_parts) > 0 and ra_parts[0].strip() else 0
+                    ra_minutes = int(ra_parts[1]) if len(ra_parts) > 1 and ra_parts[1].strip() else 0
+                    ra_seconds = float(ra_parts[2]) if len(ra_parts) > 2 and ra_parts[2].strip() else 0.0
+                except (ValueError, IndexError):
+                    ra_hours = ra_minutes = ra_seconds = None
+
+            # Parse Dec string (±DD:MM:SS.SS) into components
+            dec_str = target.get('dec', '') or ''
+            dec_degrees = dec_minutes = dec_seconds = dec_negative = None
+            if dec_str.strip():
+                dec_negative = dec_str.strip().startswith('-')
+                dec_str_abs = dec_str.strip().lstrip('+-')
+                dec_parts = dec_str_abs.split(':')
+                try:
+                    dec_degrees = int(dec_parts[0]) if len(dec_parts) > 0 and dec_parts[0].strip() else 0
+                    if dec_negative:
+                        dec_degrees = -dec_degrees
+                    dec_minutes = int(dec_parts[1]) if len(dec_parts) > 1 and dec_parts[1].strip() else 0
+                    dec_seconds = float(dec_parts[2]) if len(dec_parts) > 2 and dec_parts[2].strip() else 0.0
+                except (ValueError, IndexError):
+                    dec_degrees = dec_minutes = dec_seconds = dec_negative = None
+
             # Upsert the target record
             target_id = db.add_target(
                 target_name,
                 target_type='variable_star',
+                ra_hours=ra_hours,
+                ra_minutes=ra_minutes,
+                ra_seconds=ra_seconds,
+                dec_degrees=dec_degrees,
+                dec_minutes=dec_minutes,
+                dec_seconds=dec_seconds,
+                dec_negative=dec_negative,
                 constellation=target.get('constellation') or None,
                 magnitude_max=target.get('mag_max') or None,
                 magnitude_min=target.get('mag_min') or None,

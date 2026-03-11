@@ -203,17 +203,33 @@ class ObservationDB:
             field_names = ','.join(fields.keys())
             placeholders = ','.join(['?'] * len(fields))
             
-            cur.execute(f"""
-                INSERT OR IGNORE INTO targets ({field_names})
-                VALUES ({placeholders})
-            """, list(fields.values()))
+            # Build upsert: on conflict update every field except target_name,
+            # preferring the new value but keeping the existing one if new is NULL.
+            update_fields = [k for k in fields.keys() if k != 'target_name']
+            if update_fields:
+                update_clause = ', '.join(
+                    f"{k} = COALESCE(excluded.{k}, targets.{k})" for k in update_fields
+                )
+                sql = f"""
+                    INSERT INTO targets ({field_names})
+                    VALUES ({placeholders})
+                    ON CONFLICT(target_name) DO UPDATE SET
+                        {update_clause}
+                """
+            else:
+                sql = f"""
+                    INSERT OR IGNORE INTO targets ({field_names})
+                    VALUES ({placeholders})
+                """
             
-            if cur.rowcount == 0:
-                # Already exists, get the ID
-                cur.execute("SELECT target_id FROM targets WHERE target_name = ?", (target_name,))
-                return cur.fetchone()[0]
+            cur.execute(sql, list(fields.values()))
             
-            return cur.lastrowid
+            # lastrowid is the rowid of the inserted or updated row in SQLite
+            if cur.lastrowid:
+                return cur.lastrowid
+            # Fallback: fetch by name (shouldn't normally be needed)
+            cur.execute("SELECT target_id FROM targets WHERE target_name = ?", (target_name,))
+            return cur.fetchone()[0]
     
     def get_target(self, target_name: str) -> Optional[Dict[str, Any]]:
         """Get target by name"""
