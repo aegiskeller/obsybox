@@ -203,17 +203,33 @@ class ObservationDB:
             field_names = ','.join(fields.keys())
             placeholders = ','.join(['?'] * len(fields))
             
-            cur.execute(f"""
-                INSERT OR IGNORE INTO targets ({field_names})
-                VALUES ({placeholders})
-            """, list(fields.values()))
+            # Build upsert: on conflict update every field except target_name,
+            # preferring the new value but keeping the existing one if new is NULL.
+            update_fields = [k for k in fields.keys() if k != 'target_name']
+            if update_fields:
+                update_clause = ', '.join(
+                    f"{k} = COALESCE(excluded.{k}, targets.{k})" for k in update_fields
+                )
+                sql = f"""
+                    INSERT INTO targets ({field_names})
+                    VALUES ({placeholders})
+                    ON CONFLICT(target_name) DO UPDATE SET
+                        {update_clause}
+                """
+            else:
+                sql = f"""
+                    INSERT OR IGNORE INTO targets ({field_names})
+                    VALUES ({placeholders})
+                """
             
-            if cur.rowcount == 0:
-                # Already exists, get the ID
-                cur.execute("SELECT target_id FROM targets WHERE target_name = ?", (target_name,))
-                return cur.fetchone()[0]
+            cur.execute(sql, list(fields.values()))
             
-            return cur.lastrowid
+            # lastrowid is the rowid of the inserted or updated row in SQLite
+            if cur.lastrowid:
+                return cur.lastrowid
+            # Fallback: fetch by name (shouldn't normally be needed)
+            cur.execute("SELECT target_id FROM targets WHERE target_name = ?", (target_name,))
+            return cur.fetchone()[0]
     
     def get_target(self, target_name: str) -> Optional[Dict[str, Any]]:
         """Get target by name"""
@@ -427,6 +443,56 @@ class ObservationDB:
         logger.info("Import complete: %s", stats)
         return stats
     
+    # ========================================================================
+    # STAR COORDINATE CACHE
+    # ========================================================================
+
+    def get_star_coords(self, star_name: str) -> Optional[Tuple[str, str]]:
+        """Retrieve cached RA/Dec coordinates for a star.
+
+        Args:
+            star_name: Full star name as stored in predictions (e.g., "EH Cnc", "G5341.00974")
+
+        Returns:
+            Tuple of (ra, dec) strings, or None if not cached.
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT ra, dec FROM star_coords_cache WHERE star_name = ?",
+                (star_name,)
+            )
+            row = cur.fetchone()
+            return (row['ra'], row['dec']) if row else None
+
+    def set_star_coords(self, star_name: str, ra: str, dec: str,
+                        constellation: str = '', star_id: str = '',
+                        source: str = '') -> None:
+        """Store RA/Dec coordinates for a star in the persistent cache.
+
+        Uses an upsert so that repeated lookups overwrite stale entries while
+        preserving the original created_at timestamp.
+
+        Args:
+            star_name: Full star name (unique cache key)
+            ra: RA string in HH:MM:SS.SS format
+            dec: Dec string in ±DD:MM:SS.S format
+            constellation: Constellation abbreviation
+            star_id: var.astro.cz numeric ID (for G-stars)
+            source: Lookup source ('simbad' or 'varastro')
+        """
+        with self.get_connection() as conn:
+            conn.execute("""
+                INSERT INTO star_coords_cache
+                    (star_name, constellation, star_id, ra, dec, source, lookup_date)
+                VALUES (?, ?, ?, ?, ?, ?, date('now'))
+                ON CONFLICT(star_name) DO UPDATE SET
+                    ra          = excluded.ra,
+                    dec         = excluded.dec,
+                    source      = excluded.source,
+                    lookup_date = date('now')
+            """, (star_name, constellation, star_id, ra, dec, source))
+
     # ========================================================================
     # QUERIES AND REPORTS
     # ========================================================================
