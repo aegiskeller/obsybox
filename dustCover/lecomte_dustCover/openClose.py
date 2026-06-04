@@ -1,10 +1,21 @@
 import serial
 import time
 import sys
+import traceback
+from pathlib import Path
 import serial.tools.list_ports
 
 SERIAL_PORT = 'COM7'  # Change to your port, e.g., '/dev/ttyUSB0' on Linux
 BAUDRATE = 9600
+LOG_FILE = Path(__file__).with_name('openClose.log')
+
+
+def log(message):
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    line = f"[{timestamp}] {message}"
+    print(line)
+    with LOG_FILE.open('a', encoding='utf-8') as log_file:
+        log_file.write(line + '\n')
 
 def check_port_available(port):
     ports = [p.device for p in serial.tools.list_ports.comports()]
@@ -57,25 +68,38 @@ def get_state():
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) < 2 or sys.argv[1].lower() not in ("open", "close", "ping", "info", "getstate"):
-            print("Usage: python openClose.py [open|close|ping|info|getstate]")
+        log(f"Starting openClose.py with argv={sys.argv}")
+        log(f"Python executable: {sys.executable}")
+        if len(sys.argv) < 2:
+            log("Usage: python openClose.py [open|opened|close|closed|ping|info|getstate]")
             sys.exit(1)
-        action = sys.argv[1].lower()
+        action_aliases = {
+            "opened": "open",
+            "closed": "close",
+        }
+        action = action_aliases.get(sys.argv[1].lower(), sys.argv[1].lower())
+        if action not in ("open", "close", "ping", "info", "getstate"):
+            log("Usage: python openClose.py [open|opened|close|closed|ping|info|getstate]")
+            sys.exit(1)
+        log(f"Resolved action: {action}")
         if action == "open":
-            print("Opening shutter...")
+            log("Opening shutter...")
             open_shutter()
         elif action == "close":
-            print("Closing shutter...")
+            log("Closing shutter...")
             close_shutter()
         elif action == "ping":
-            print("Pinging device...")
+            log("Pinging device...")
             ping_device()
         elif action == "info":
-            print("Requesting firmware info...")
+            log("Requesting firmware info...")
             get_firmware_info()
         elif action == "getstate":
-            print("Requesting current state...")
+            log("Requesting current state...")
             get_state()
+        log("RESULT:OK")
     except Exception as e:
-        print(f"Error: {e}")
+        log(f"Error: {e}")
+        log(traceback.format_exc().rstrip())
+        log("RESULT:FAIL")
         sys.exit(2)
