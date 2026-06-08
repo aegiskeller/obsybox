@@ -31,14 +31,14 @@ enum CoverState {
 Servo servo;
 
 // Use D7 for servo signal on LOLIN/Wemos D1 mini
-const int SERVO_PIN = D7;
+const int SERVO_PIN = 7;
 
 // The `setup` function runs once when you press reset or power the board.
 void setup() {
     state = closed;
 
     // Initialize serial port I/O.
-    Serial.begin(115200); // 115200 is typical for ESP8266
+    Serial.begin(9600); // 115200 is typical for ESP8266
     while (!Serial) {
         ; // Wait for serial port to connect (optional on ESP8266)
     }
