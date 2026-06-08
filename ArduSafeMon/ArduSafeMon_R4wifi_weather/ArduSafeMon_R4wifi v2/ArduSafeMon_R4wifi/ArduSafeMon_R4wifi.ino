@@ -88,7 +88,6 @@ void setup() {
 
   // Initialize the watchdog timer (8 second timeout)
   WDT.begin(8000); // 8000ms = 8s
-  Serial.println("Watchdog timer enabled with 8000ms timeout");
   
   // Initialize serial monitoring
   lastSerialActivity = millis();

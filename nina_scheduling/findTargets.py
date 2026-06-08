@@ -112,6 +112,11 @@ if not template_path.exists():
 SUNSET_TIME = "20:00"  # Default sunset time LOCAL TIME
 STAR_COORDS_DB_PATH = Path("Z:/scheduled_observations.sqlite")  # Persistent star coordinate cache
 
+# Broad magnitude range fetched from VarAstro and stored in cache.
+# The user-configured MAG_MIN/MAG_MAX is applied as a post-cache filter.
+FETCH_MAG_MIN = 8
+FETCH_MAG_MAX = 14
+
 def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_cache: bool = True) -> List[Dict]:
     """
     Fetch minima predictions from var.astro.cz using Selenium
@@ -146,7 +151,11 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         # Apply observation night filtering with correct timezone handling
         night_filtered_targets = filter_targets_by_observation_night(filtered_targets, obs_date)
         logger.info(f"After observation night filtering: {len(night_filtered_targets)} targets remain")
-        
+
+        # Apply user magnitude filter (MAG_MIN/MAG_MAX) to cached broad data
+        night_filtered_targets = apply_magnitude_filter(night_filtered_targets)
+        logger.info(f"After user magnitude filter: {len(night_filtered_targets)} targets remain")
+
         return night_filtered_targets
     
     # Setup Chrome options
@@ -183,176 +192,82 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         )
         logger.info("Login successful")
         
-        # Navigate to predictions page with initial parameters
-        # Use YYYY-MM-DD format to match what the website's date field expects
-        pred_url = (f"https://var.astro.cz/en/Stars/MinimaPredictions?init=1"
-                   f"&obsLat={LATITUDE}&obsLong={LONGITUDE}"
-                   f"&date={obs_date.strftime('%Y-%m-%d')}"
-
-                   f"&showVisibleEventsOnly=true")
-        logger.info(f"Requesting predictions for date: {obs_date.strftime('%Y-%m-%d')} (YYYY-MM-DD format)")
-        logger.info(f"URL: {pred_url}")
+        # Navigate to predictions page (bare URL — the form must be submitted to load data)
+        pred_url = "https://var.astro.cz/en/Stars/MinimaPredictions"
+        logger.info(f"Navigating to predictions page: {pred_url}")
         driver.get(pred_url)
         logger.info(f"Loading predictions page for {obs_date}...")
-        
-        # Wait for page to load but NOT for the table yet - we need to set the date first
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-        
-        # CRITICAL: Set the date field IMMEDIATELY after page load and BEFORE applying other filters
-        try:
-            # The correct date field is 'pred-date' - use JavaScript to set it directly
-            date_set = False
-            # Use DD/MM/YYYY format as expected by the website (e.g., "02/11/2025" for Nov 2, 2025)
-            target_date = obs_date.strftime('%d/%m/%Y')
-            
-            try:
-                # First, check current value and field attributes
-                inspection_script = """
-                var dateField = document.getElementById('pred-date');
-                if (dateField) {
-                    return {
-                        value: dateField.value,
-                        type: dateField.type,
-                        pattern: dateField.pattern || 'none',
-                        placeholder: dateField.placeholder || 'none',
-                        className: dateField.className,
-                        required: dateField.required
-                    };
-                } else {
-                    return 'NOT_FOUND';
-                }
-                """
-                field_info = driver.execute_script(inspection_script)
-                logger.info(f"Date field info: {field_info}")
-                
-                # Based on current value '2025-11-01', the field expects YYYY-MM-DD format!
-                formats_to_try = [
-                    obs_date.strftime('%Y-%m-%d'),  # YYYY-MM-DD (2025-11-02) - matches field format
-                    obs_date.strftime('%d/%m/%Y'),  # DD/MM/YYYY (02/11/2025) - fallback
-                    obs_date.strftime('%m/%d/%Y'),  # MM/DD/YYYY (11/02/2025) - fallback
-                ]
-                
-                logger.info(f"Will try date formats: {formats_to_try}")
-                
-                for i, date_format in enumerate(formats_to_try):
-                    script = f"""
-                    var dateField = document.getElementById('pred-date');
-                    if (dateField) {{
-                        dateField.value = '{date_format}';
-                        dateField.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        dateField.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        return dateField.value;
-                    }} else {{
-                        return 'NOT_FOUND';
-                    }}
-                    """
-                    
-                    new_value = driver.execute_script(script)
-                    logger.info(f"Attempt {i+1}: Set date to '{date_format}', field now shows: '{new_value}'")
-                    
-                    if new_value == date_format:
-                        date_set = True
-                        target_date = date_format  # Update for logging
-                        logger.info(f"✅ Date field successfully set with format {i+1}: {date_format}")
-                        break
-                    elif new_value == 'NOT_FOUND':
-                        logger.error("❌ Date field 'pred-date' not found!")
-                        break
-                if not date_set:
-                    logger.warning(f"⚠️  All date format attempts failed. Field value remains: '{new_value}'")
-                
-                # Also trigger form submission or page reload to ensure changes take effect
-                if date_set:
-                    logger.info("Triggering form update...")
-                    driver.execute_script("""
 
-                        // Look for and click a submit or update button
-                        var submitButton = document.querySelector('button[type="submit"]') || 
-                                         document.querySelector('input[type="submit"]') ||
-                                         document.querySelector('button:contains("Update")') ||
-                                         document.querySelector('button:contains("Search")');
-                        if (submitButton) {
-                            submitButton.click();
-                        } else {
-                            // Trigger a form event to update the table
-                            var form = document.querySelector('form');
-                            if (form) {
-                                form.dispatchEvent(new Event('submit', { bubbles: true }));
-                            }
-                        }
-                    """)
-                    
-            except Exception as e:
-                logger.error(f"Failed to set date field using JavaScript: {e}")
-            
-            if not date_set:
-                logger.error(f"❌ FAILED to set date field! This will result in wrong targets (yesterday's data)!")
-
-                logger.error(f"Expected date: {target_date}")
-            
-            # Wait longer for table to reload after date change
-            import time
-            time.sleep(8)  # Increased wait time for form submission/page reload
-            
-        except Exception as e:
-            logger.error(f"Error setting date field: {e}")
-        
-        # Now wait for the table to be present (should have correct date now)
+        # Wait for the search form to be present
         WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.ID, "minima-pred-table"))
+            EC.presence_of_element_located((By.ID, "pred-date"))
         )
-        
-        # Fill in other filter fields (date is already set above)
-        try:
-            # Magnitude max filter
-            mag_max_input = driver.find_element(By.ID, "fMagMax")
-            mag_max_input.clear()
-            mag_max_input.send_keys(f"<{MAG_MAX}")
-            
-            # Magnitude min filter  
-            mag_min_input = driver.find_element(By.ID, "fMagMin")
-            mag_min_input.clear()
-            mag_min_input.send_keys(f">{MAG_MIN}")
-            
-            # Altitude filter
-            altitude_input = driver.find_element(By.ID, "fAltitude")
-            altitude_input.clear()
-            altitude_input.send_keys(f">{MIN_ALTITUDE}")
-            
-            # Azimuth filter - try entering as comma-separated
-            azimuth_input = driver.find_element(By.ID, "fAzimuth")
-            azimuth_input.clear()
-            azimuth_filter = ','.join(ALLOWED_AZIMUTHS)
-            azimuth_input.send_keys(azimuth_filter)
-            
-            logger.info(f"Applied filters: date={obs_date.strftime('%Y-%m-%d')}, mag {MAG_MIN}-{MAG_MAX}, alt >{MIN_ALTITUDE}°, azimuth={azimuth_filter}")
-            
-            # Press Enter to apply filters
-            from selenium.webdriver.common.keys import Keys
-            azimuth_input.send_keys(Keys.RETURN)
-            
-            # Wait for table to reload
-            time.sleep(5)
-            
-        except Exception as e:
-            logger.warning(f"Could not apply filters via form fields: {e}")
-        
-        logger.info("Table element found, waiting for data...")
-        
-        # Wait for DataTable to finish loading - check for processing indicator to disappear
-        import time
-        time.sleep(5)  # Give DataTable time to make AJAX request
-        
-        # Wait for table rows to populate (not the "No data" message)
-        WebDriverWait(driver, 30).until(
-            lambda d: len(d.find_elements(By.CSS_SELECTOR, "#minima-pred-table tbody tr")) > 0
+
+        # ── Fill the search form ──────────────────────────────────────────────
+        # The page now has a search form that must be submitted before the
+        # DataTable loads.  Field IDs confirmed from page source (2026-06-06):
+        #   pred-obs-lat   – observer latitude
+        #   pred-obs-long  – observer longitude
+        #   pred-date      – "Evening date" (type=date, expects YYYY-MM-DD)
+        #   pred-max-mag   – brightness from (Mag) — upper brightness limit
+        #   pred-min-mag   – brightness to (Mag)   — lower brightness limit
+        #   submit-button  – Search button (type=submit)
+        date_str = obs_date.strftime('%Y-%m-%d')
+        logger.info(f"Setting search form: date={date_str}, lat={LATITUDE}, lon={LONGITUDE}, "
+                    f"mag {FETCH_MAG_MIN}–{FETCH_MAG_MAX}")
+
+        driver.execute_script("""
+            function setField(id, val) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.value = val;
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                el.dispatchEvent(new Event('input',  {bubbles: true}));
+            }
+            setField('pred-obs-lat',  arguments[0]);
+            setField('pred-obs-long', arguments[1]);
+            setField('pred-date',     arguments[2]);
+            setField('pred-max-mag',  arguments[3]);
+            setField('pred-min-mag',  arguments[4]);
+        """, str(LATITUDE), str(LONGITUDE), date_str,
+             str(FETCH_MAG_MIN), str(FETCH_MAG_MAX))
+
+        # Verify the date field took the value
+        set_date = driver.execute_script("return document.getElementById('pred-date').value;")
+        if set_date == date_str:
+            logger.info(f"✅ Date field set to {set_date}")
+        else:
+            logger.warning(f"⚠️  Date field shows '{set_date}' instead of '{date_str}'")
+
+        # Submit the search form
+        logger.info("Clicking Search button …")
+        submit_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "submit-button"))
         )
-        
-        # Additional wait to ensure all data is loaded
-        time.sleep(2)
-        logger.info("Table loaded, extracting data...")
+        submit_btn.click()
+
+        # Wait for the DataTable to finish its AJAX request and show rows.
+        # The table exists in the DOM from page load, but rows only appear
+        # after the form is submitted and the server responds.
+        logger.info("Waiting for DataTable to load rows …")
+
+        def _table_settled(d):
+            """True once DataTable exits the 'Loading…' transient state."""
+            rows = d.find_elements(By.CSS_SELECTOR, "#minima-pred-table tbody tr")
+            if not rows:
+                return False
+            return rows[0].text.strip() != "Loading..."
+
+        WebDriverWait(driver, 45).until(_table_settled)
+        time.sleep(1)  # brief settle after AJAX completes
+
+        # If the table settled on an empty-data row there are no predictions tonight
+        settled_rows = driver.find_elements(By.CSS_SELECTOR, "#minima-pred-table tbody tr")
+        if settled_rows and settled_rows[0].get_attribute("class") == "dataTables_empty":
+            logger.info("No predictions found for this date/location/magnitude range.")
+            return []
+
+        logger.info("Table rows loaded, extracting data...")
         
         # Check if we need to change page size in DataTable
         try:
@@ -527,11 +442,15 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(night_filtered_targets, f, indent=2, ensure_ascii=False)
         logger.info(f"Saved enriched data to cache: {cache_file}")
-        
+
+        # Apply user magnitude filter (MAG_MIN/MAG_MAX) now that broad data is cached
+        mag_filtered_targets = apply_magnitude_filter(night_filtered_targets)
+        logger.info(f"After user magnitude filter: {len(mag_filtered_targets)} targets remain")
+
         # Final filter check for any remaining issues
-        final_targets = apply_final_filters(night_filtered_targets)
+        final_targets = apply_final_filters(mag_filtered_targets)
         logger.info(f"After final filters: {len(final_targets)} targets remain")
-        
+
         return final_targets
         
     except Exception as e:
@@ -821,18 +740,18 @@ def apply_basic_filters(targets: List[Dict]) -> List[Dict]:
                     passed = False
                     continue
         
-        # Filter by magnitude
-        # Star's max mag should be > GUI's min mag AND star's min mag should be < GUI's max mag
+        # Filter by magnitude - use broad fetch range so the cache covers 8-14;
+        # the user's MAG_MIN/MAG_MAX is applied separately via apply_magnitude_filter.
         try:
             mag_max = float(target.get('mag_max', '0').replace(',', '.'))
             mag_min = float(target.get('mag_min', '0').replace(',', '.'))
-            
+
             # Handle invalid magnitude ranges where min is 0 (treat both as mag_max)
             if mag_min == 0 and mag_max > 0:
                 mag_min = mag_max
-            
-            # Target is valid if: star's max magnitude > GUI min AND star's min magnitude < GUI max
-            if not (mag_max > MAG_MIN and mag_min < MAG_MAX):
+
+            # Target is valid if within the broad fetch range
+            if not (mag_max > FETCH_MAG_MIN and mag_min < FETCH_MAG_MAX):
                 stats['magnitude_filtered'] += 1
                 passed = False
                 continue
@@ -863,11 +782,49 @@ def apply_basic_filters(targets: List[Dict]) -> List[Dict]:
             stats['passed'] += 1
     
     logger.info(f"Basic filter stats: {stats['passed']} passed, "
-                f"{stats['magnitude_filtered']} filtered by magnitude, "
+                f"{stats['magnitude_filtered']} filtered by magnitude (fetch range {FETCH_MAG_MIN}-{FETCH_MAG_MAX}), "
                 f"{stats['altitude_filtered']} filtered by altitude, "
                 f"{stats['azimuth_filtered']} filtered by azimuth, "
                 f"{stats['g_targets_filtered']} G-targets filtered")
-    
+
+    return filtered
+
+
+def apply_magnitude_filter(targets: List[Dict]) -> List[Dict]:
+    """
+    Filter targets by the user-configured magnitude range (MAG_MIN / MAG_MAX).
+
+    This is intentionally separate from apply_basic_filters so that the cache
+    can store the full FETCH_MAG_MIN–FETCH_MAG_MAX (8-14) range and the
+    user's narrower range is applied on top.
+
+    Args:
+        targets: List of target dictionaries
+
+    Returns:
+        Targets whose magnitude range overlaps the user-configured window
+    """
+    filtered = []
+    removed = 0
+    for target in targets:
+        try:
+            mag_max = float(target.get('mag_max', '0').replace(',', '.'))
+            mag_min = float(target.get('mag_min', '0').replace(',', '.'))
+
+            if mag_min == 0 and mag_max > 0:
+                mag_min = mag_max
+
+            if mag_max > MAG_MIN and mag_min < MAG_MAX:
+                filtered.append(target)
+            else:
+                removed += 1
+        except (ValueError, AttributeError):
+            removed += 1
+
+    logger.info(
+        f"User magnitude filter ({MAG_MIN}–{MAG_MAX}): "
+        f"{len(filtered)} passed, {removed} removed"
+    )
     return filtered
 
 
