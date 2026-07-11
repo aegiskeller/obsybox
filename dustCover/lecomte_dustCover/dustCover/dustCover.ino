@@ -1,11 +1,12 @@
 /*
  * Arduino_Firmware.ino
  * Modified for ESP8266 (e.g., LOLIN/Wemos D1 mini)
+ * and then for Ard Uno
  */
 
 #include <Servo.h>
 
-constexpr auto DEVICE_GUID = "b45ba2c9-f554-4b42-a43c-10605ca3b84d";
+constexpr auto DEVICE_GUID = "b45ba2c9-f554-4b42-a43c-10605cb3b84d";
 
 constexpr auto COMMAND_PING = "COMMAND:PING";
 constexpr auto RESULT_PING = "RESULT:PING:OK:";
@@ -24,6 +25,7 @@ constexpr auto COMMAND_CLOSE = "COMMAND:CLOSE";
 constexpr auto ERROR_INVALID_COMMAND = "ERROR:INVALID_COMMAND";
 
 enum CoverState {
+    unknown,
     open,
     closed
 } state;
@@ -32,10 +34,14 @@ Servo servo;
 
 // Use D7 for servo signal on LOLIN/Wemos D1 mini
 const int SERVO_PIN = 7;
+const int OPEN_LIMIT_SWITCH_PIN = 9;
+const int CLOSE_LIMIT_SWITCH_PIN = 8;
+
+void updateStateFromLimitSwitches();
 
 // The `setup` function runs once when you press reset or power the board.
 void setup() {
-    state = closed;
+    state = unknown;
 
     // Initialize serial port I/O.
     Serial.begin(9600); // 115200 is typical for ESP8266
@@ -47,9 +53,13 @@ void setup() {
     Serial.println("Dust Cover Firmware starting...");
     Serial.print("Servo pin: "); Serial.println(SERVO_PIN);
     Serial.println("Attaching servo...");
-    servo.attach(SERVO_PIN, 500, 2500); // Wider pulse range for full rotation
-    servo.write(0);
-    Serial.println("Servo initialized to 0 (closed position).");
+    servo.attach(SERVO_PIN, 450, 2020); // Wider pulse range for full rotation
+    Serial.println("Servo attached. Position unchanged until command.");
+
+    // Limit switches are assumed to pull LOW when pressed.
+    pinMode(OPEN_LIMIT_SWITCH_PIN, INPUT_PULLUP);
+    pinMode(CLOSE_LIMIT_SWITCH_PIN, INPUT_PULLUP);
+    updateStateFromLimitSwitches();
 
     // Optionally turn off built-in LED
     pinMode(LED_BUILTIN, OUTPUT);
@@ -59,6 +69,8 @@ void setup() {
 
 // The `loop` function runs over and over again until power down or reset.
 void loop() {
+    updateStateFromLimitSwitches();
+
     if (Serial.available() > 0) {
         String command = Serial.readStringUntil('\n');
         command.trim(); // Remove any \r or whitespace
@@ -100,6 +112,8 @@ void sendFirmwareInfo() {
 }
 
 void sendCurrentState() {
+    updateStateFromLimitSwitches();
+
     Serial.print("Reporting current state: ");
     switch (state) {
     case open:
@@ -117,12 +131,31 @@ void sendCurrentState() {
     }
 }
 
+void updateStateFromLimitSwitches() {
+    bool openLimitPressed = digitalRead(OPEN_LIMIT_SWITCH_PIN) == LOW;
+    bool closeLimitPressed = digitalRead(CLOSE_LIMIT_SWITCH_PIN) == LOW;
+
+    if (openLimitPressed && !closeLimitPressed) {
+        state = open;
+    }
+    else if (closeLimitPressed && !openLimitPressed) {
+        state = closed;
+    }
+    else {
+        state = unknown;
+    }
+}
+
 void openCover() {
     int pos = servo.read();
     Serial.print("Current position of servo is ");
     Serial.println(pos);
     if (pos < 180) {
         for (; pos <= 180; pos++) {
+            if (digitalRead(OPEN_LIMIT_SWITCH_PIN) == LOW) {
+                Serial.println("Open limit reached. Stopping servo.");
+                break;
+            }
             servo.write(pos);
             if (pos % 10 == 0) {
                 Serial.print("Moving servo to: ");
@@ -132,8 +165,8 @@ void openCover() {
             yield();
         }
     }
-    state = open;
-    Serial.println("Cover opened.");
+    updateStateFromLimitSwitches();
+    Serial.println("Open command complete.");
 }
 
 void closeCover() {
@@ -142,6 +175,10 @@ void closeCover() {
     Serial.println(pos);
     if (pos > 0) {
         for (; pos >= 0; pos--) {
+            if (digitalRead(CLOSE_LIMIT_SWITCH_PIN) == LOW) {
+                Serial.println("Close limit reached. Stopping servo.");
+                break;
+            }
             servo.write(pos);
             if (pos % 10 == 0) {
                 Serial.print("Moving servo to: ");
@@ -151,8 +188,8 @@ void closeCover() {
             yield();
         }
     }
-    state = closed;
-    Serial.println("Cover closed.");
+    updateStateFromLimitSwitches();
+    Serial.println("Close command complete.");
 }
 
 void handleInvalidCommand() {
