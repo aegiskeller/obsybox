@@ -98,6 +98,9 @@ BASE_URL = "https://var.astro.cz/en/Stars/MinimaPredictions"
 USERNAME = VARASTRO_USERNAME
 PASSWORD = VARASTRO_PASSWORD
 
+LOGIN_URL = "https://var.astro.cz/en/Identity/Account/Login"
+PREDICTIONS_URL = "https://var.astro.cz/en/Stars/MinimaPredictions"
+
 # NINA template configuration
 NINA_TEMPLATE_FILE = "VarStarS50.template.json"  # Template file for NINA JSON generation (relative to script directory)
 # check if the template file exists
@@ -116,6 +119,116 @@ STAR_COORDS_DB_PATH = Path("Z:/scheduled_observations.sqlite")  # Persistent sta
 # The user-configured MAG_MIN/MAG_MAX is applied as a post-cache filter.
 FETCH_MAG_MIN = 8
 FETCH_MAG_MAX = 14
+
+
+def _build_chrome_options(headless: bool = True) -> Options:
+    """Create Chrome options for scraping and optional interactive fallback."""
+    chrome_options = Options()
+    if headless:
+        chrome_options.add_argument("--headless")
+    else:
+        # Reduce obvious automation fingerprints for Cloudflare checks.
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option("useAutomationExtension", False)
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    return chrome_options
+
+
+def _page_has_login_form(driver) -> bool:
+    try:
+        return bool(driver.find_elements(By.ID, "loginForm"))
+    except Exception:
+        return False
+
+
+def _page_requires_verification(driver) -> bool:
+    try:
+        page_source = driver.page_source
+    except Exception:
+        return False
+
+    markers = (
+        "Verification failed. Please try again.",
+        "Please verify you are human",
+        "Please complete the security check",
+    )
+    return any(marker in page_source for marker in markers)
+
+
+def _wait_for_login_result(driver, timeout: int = 15, fail_on_verification: bool = True) -> str:
+    """Return 'success', 'verification', or 'timeout' after attempting login."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        current_url = driver.current_url.lower()
+
+        if "minimapredictions" in current_url or driver.find_elements(By.ID, "pred-date"):
+            return "success"
+
+        if fail_on_verification and _page_has_login_form(driver) and _page_requires_verification(driver):
+            return "verification"
+
+        time.sleep(0.5)
+
+    if fail_on_verification and _page_has_login_form(driver) and _page_requires_verification(driver):
+        return "verification"
+    return "timeout"
+
+
+def _perform_login(driver, interactive: bool = False, prefill_credentials: bool = True) -> None:
+    """Log in to VarAstro, optionally allowing the user to complete verification manually."""
+    driver.get(LOGIN_URL)
+    logger.info("Loading login page...")
+
+    WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.ID, "user-name"))
+    )
+
+    if prefill_credentials:
+        email_field = driver.find_element(By.ID, "user-name")
+        password_field = driver.find_element(By.ID, "user-password")
+        email_field.clear()
+        password_field.clear()
+        email_field.send_keys(USERNAME)
+        password_field.send_keys(PASSWORD)
+
+    if interactive:
+        logger.info("Waiting for manual login completion in browser...")
+        try:
+            messagebox.showinfo(
+                "VarAstro Login Required",
+                "VarAstro now requires a browser verification step.\n\n"
+                "A Chrome window has been opened.\n"
+                "Log in manually in that window and complete verification, "
+                "then click OK here."
+            )
+        except Exception:
+            logger.info("Complete the browser login manually, then return to the application.")
+    else:
+        submit_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        submit_button.click()
+        logger.info("Login submitted, waiting for redirect...")
+
+    login_result = _wait_for_login_result(
+        driver,
+        timeout=300 if interactive else 15,
+        fail_on_verification=not interactive,
+    )
+    if login_result == "success":
+        logger.info("Login successful")
+        return
+
+    if login_result == "verification":
+        raise RuntimeError(
+            "VarAstro login was blocked by Cloudflare verification. "
+            "Complete the login in the interactive browser window or try again later."
+        )
+
+    raise RuntimeError(
+        "VarAstro login did not complete within the expected time. "
+        "The login flow may have changed or the site may be unavailable."
+    )
 
 def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_cache: bool = True) -> List[Dict]:
     """
@@ -158,44 +271,37 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
 
         return night_filtered_targets
     
-    # Setup Chrome options
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Run in background
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    
     driver = None
     try:
-        driver = webdriver.Chrome(options=chrome_options)
+        driver = webdriver.Chrome(options=_build_chrome_options(headless=True))
         logger.info("Chrome driver initialized")
         
-        # Navigate to login page
-        login_url = "https://var.astro.cz/en/Identity/Account/Login"
-        driver.get(login_url)
-        logger.info("Loading login page...")
-        
-        # Fill in login form
-        email_field = driver.find_element(By.ID, "user-name")
-        password_field = driver.find_element(By.ID, "user-password")
-        
-        email_field.send_keys(USERNAME)
-        password_field.send_keys(PASSWORD)
-        
-        # Submit form
-        submit_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        submit_button.click()
-        logger.info("Login submitted, waiting for redirect...")
-        
-        # Wait for login to complete
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "header-navbar"))
-        )
-        logger.info("Login successful")
+        try:
+            _perform_login(driver, interactive=False)
+        except RuntimeError as exc:
+            if "Cloudflare verification" not in str(exc):
+                raise
+
+            logger.warning(str(exc))
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+            driver = webdriver.Chrome(options=_build_chrome_options(headless=False))
+            try:
+                driver.execute_cdp_cmd(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"},
+                )
+            except Exception:
+                pass
+            logger.info("Retrying login in interactive browser mode")
+            _perform_login(driver, interactive=True, prefill_credentials=False)
         
         # Navigate to predictions page (bare URL — the form must be submitted to load data)
-        pred_url = "https://var.astro.cz/en/Stars/MinimaPredictions"
-        logger.info(f"Navigating to predictions page: {pred_url}")
-        driver.get(pred_url)
+        logger.info(f"Navigating to predictions page: {PREDICTIONS_URL}")
+        driver.get(PREDICTIONS_URL)
         logger.info(f"Loading predictions page for {obs_date}...")
 
         # Wait for the search form to be present
@@ -466,6 +572,9 @@ def fetch_minima_predictions(obs_date: date = None, max_pages: int = None, use_c
                 logger.info(f"Page source saved to {debug_path}")
             except:
                 pass
+
+        if isinstance(e, RuntimeError):
+            raise
         return []
     finally:
         if driver:
@@ -2428,8 +2537,12 @@ def export_to_nina_json(targets: List[Dict], output_dir: Path = None, template_f
             logger.info(f"Updated Pushover message for last target: {target_name}")
         
         
-        # Save to file
-        filename = f"{target_name.replace('/', '_')}.json"
+        # Save to file (sanitize for Windows-invalid filename characters)
+        safe_name = re.sub(r'[<>:"/\\|?*]+', '_', target_name).strip().rstrip('.')
+        safe_name = re.sub(r'\s+', '_', safe_name)
+        if not safe_name:
+            safe_name = f"target_{i+1}"
+        filename = f"{safe_name}.json"
         filepath = output_dir / filename
         
         # Normalize $id and $ref values to ensure uniqueness and validity
@@ -2624,6 +2737,19 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
             for item in obj:
                 update_end_time_condition(item, hours, minutes)
 
+    def prefix_nina_ids(obj, prefix):
+        """Prefix all $id/$ref values in a copied template to avoid cross-target ID collisions."""
+        if isinstance(obj, dict):
+            if "$id" in obj and obj["$id"] is not None:
+                obj["$id"] = f"{prefix}{obj['$id']}"
+            if "$ref" in obj and obj["$ref"] is not None:
+                obj["$ref"] = f"{prefix}{obj['$ref']}"
+            for value in obj.values():
+                prefix_nina_ids(value, prefix)
+        elif isinstance(obj, list):
+            for item in obj:
+                prefix_nina_ids(item, prefix)
+
     # Create a deep copy of the night template
     import copy
     night_sequence = copy.deepcopy(night_template)
@@ -2679,6 +2805,7 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         
         # Create target container from template
         target_container = copy.deepcopy(target_template)
+        prefix_nina_ids(target_container, f"target{i+1}_")
         
         # Update target name
         target_container["Target"]["TargetName"] = target_name
@@ -2737,38 +2864,16 @@ def export_to_nina_night_sequence(targets: List[Dict], output_dir: Path = None, 
         
         target_containers.append(target_container)
     
-    # Fix Parent references for all target containers
-    def fix_parent_references(containers, parent_ref="1"):
-        """Fix Parent references to point to the sequence root"""
-        for container in containers:
-            # Set the target container's parent to the sequence root
-            container["Parent"] = {"$ref": parent_ref}
-            
-            # Recursively fix all child Parent references
-            def fix_child_parents(obj, container_id):
-                if isinstance(obj, dict):
-                    if "Parent" in obj and obj.get("$id") != container_id:
-                        # Point it to the container
-                        obj["Parent"] = {"$ref": container_id}
-                    for value in obj.values():
-                        if isinstance(value, (dict, list)):
-                            fix_child_parents(value, container_id)
-                elif isinstance(obj, list):
-                    for item in obj:
-                        if isinstance(item, (dict, list)):
-                            fix_child_parents(item, container_id)
-            
-            # Fix all children to point to this container
-            if container.get("$id"):
-                fix_child_parents(container, container["$id"])
-    
-    fix_parent_references(target_containers)
-    
     # Insert target containers into the night sequence
     # Find the TargetAreaContainer and insert targets there
     target_area_found = False
+    target_area_id = None
     for item in night_sequence["Items"]["$values"]:
         if item.get("$type") == "NINA.Sequencer.Container.TargetAreaContainer, NINA.Sequencer":
+            target_area_id = str(item.get("$id")) if item.get("$id") is not None else None
+            if target_area_id:
+                for container in target_containers:
+                    container["Parent"] = {"$ref": target_area_id}
             # Found the target area container - replace its items with our targets
             item["Items"]["$values"] = target_containers
             target_area_found = True

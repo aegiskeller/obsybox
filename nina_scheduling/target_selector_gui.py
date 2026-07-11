@@ -28,10 +28,17 @@ from findTargets import (
     select_targets_for_night,
     export_to_nina_format,
     export_to_nina_json,
+    apply_basic_filters,
+    filter_targets_by_observation_night,
+    apply_magnitude_filter,
+    apply_final_filters,
+    parse_minima_time,
+    utc_to_local,
     record_scheduled_targets,
     format_target_display_name,
     NINA_EXPORT_BASE_DIR
 )
+from generate_targets_from_nina_api import load_targets_from_db
 
 # Import configuration management
 try:
@@ -61,6 +68,18 @@ except ImportError:
         CENTER_AFTER_DRIFT_ARCMIN, MAX_TARGETS_PER_NIGHT, TIMEZONE_OFFSET
     )
     ALLOW_G_TARGETS = True  # Default fallback value
+
+DEFAULT_SOURCE_MODE = "varastro"
+DEFAULT_NINA_API_DB_PATH = str((Path(__file__).resolve().parent / ".." / ".." / "NINA_API" / "varcz_eb.db").resolve())
+DEFAULT_NINA_API_TABLE = "stars"
+
+try:
+    _source_settings = load_config().get('data_source_settings', {})
+    DEFAULT_SOURCE_MODE = _source_settings.get('source', DEFAULT_SOURCE_MODE)
+    DEFAULT_NINA_API_DB_PATH = _source_settings.get('nina_api_db_path', DEFAULT_NINA_API_DB_PATH)
+    DEFAULT_NINA_API_TABLE = _source_settings.get('nina_api_table', DEFAULT_NINA_API_TABLE)
+except Exception:
+    pass
 
 # Midnight color scheme
 COLORS = {
@@ -337,6 +356,9 @@ class TargetSelectorGUI:
         
         # Target constraints card (checkboxes)
         self.create_target_constraints_card(scrollable_frame)
+
+        # Data source card
+        self.create_data_source_card(scrollable_frame)
         
         # Export paths card
         self.create_export_paths_card(scrollable_frame)
@@ -609,6 +631,113 @@ class TargetSelectorGUI:
                 
         widget.bind('<Enter>', show_tooltip)
         widget.bind('<Leave>', hide_tooltip)
+
+    def create_data_source_card(self, parent):
+        """Create data source selection card"""
+        card = tk.Frame(parent, bg=COLORS['bg_light'], relief='flat')
+        card.pack(fill='x', padx=20, pady=10)
+
+        title_label = tk.Label(
+            card,
+            text="🗄️ Data Source",
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            font=('Helvetica', 12, 'bold')
+        )
+        title_label.pack(anchor='w', padx=15, pady=(15, 10))
+
+        source_row = tk.Frame(card, bg=COLORS['bg_light'])
+        source_row.pack(fill='x', padx=15, pady=5)
+
+        self.data_source_var = tk.StringVar(value=DEFAULT_SOURCE_MODE)
+
+        tk.Radiobutton(
+            source_row,
+            text="VarAstro (web)",
+            variable=self.data_source_var,
+            value="varastro",
+            command=self._on_source_mode_changed,
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            selectcolor=COLORS['bg_medium'],
+            activebackground=COLORS['bg_light'],
+            activeforeground=COLORS['text'],
+            font=('Helvetica', 10)
+        ).pack(side='left', padx=(0, 20))
+
+        tk.Radiobutton(
+            source_row,
+            text="NINA_API DB",
+            variable=self.data_source_var,
+            value="nina_api_db",
+            command=self._on_source_mode_changed,
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            selectcolor=COLORS['bg_medium'],
+            activebackground=COLORS['bg_light'],
+            activeforeground=COLORS['text'],
+            font=('Helvetica', 10)
+        ).pack(side='left')
+
+        db_path_row = tk.Frame(card, bg=COLORS['bg_light'])
+        db_path_row.pack(fill='x', padx=15, pady=5)
+
+        db_path_label = tk.Label(
+            db_path_row,
+            text="DB Path:",
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            font=('Helvetica', 10),
+            width=20,
+            anchor='w'
+        )
+        db_path_label.pack(side='left', padx=(0, 10))
+
+        self.nina_api_db_path_entry = tk.Entry(
+            db_path_row,
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            font=('Helvetica', 10),
+            relief='flat',
+            insertbackground=COLORS['text']
+        )
+        self.nina_api_db_path_entry.insert(0, DEFAULT_NINA_API_DB_PATH)
+        self.nina_api_db_path_entry.pack(side='left', fill='x', expand=True, ipady=5)
+
+        db_table_row = tk.Frame(card, bg=COLORS['bg_light'])
+        db_table_row.pack(fill='x', padx=15, pady=5)
+
+        db_table_label = tk.Label(
+            db_table_row,
+            text="DB Table:",
+            bg=COLORS['bg_light'],
+            fg=COLORS['text'],
+            font=('Helvetica', 10),
+            width=20,
+            anchor='w'
+        )
+        db_table_label.pack(side='left', padx=(0, 10))
+
+        self.nina_api_table_entry = tk.Entry(
+            db_table_row,
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text'],
+            font=('Helvetica', 10),
+            relief='flat',
+            insertbackground=COLORS['text']
+        )
+        self.nina_api_table_entry.insert(0, DEFAULT_NINA_API_TABLE)
+        self.nina_api_table_entry.pack(side='left', fill='x', expand=True, ipady=5)
+
+        tk.Frame(card, bg=COLORS['bg_light'], height=10).pack()
+        self._on_source_mode_changed()
+
+    def _on_source_mode_changed(self):
+        """Enable or disable DB settings based on source mode"""
+        mode = self.data_source_var.get()
+        state = 'normal' if mode == 'nina_api_db' else 'disabled'
+        self.nina_api_db_path_entry.config(state=state)
+        self.nina_api_table_entry.config(state=state)
     
     def create_export_paths_card(self, parent):
         """Create export paths card"""
@@ -850,6 +979,16 @@ class TargetSelectorGUI:
             # Validate at least one azimuth is selected
             if not any(var.get() for var in self.azimuth_vars.values()):
                 raise ValueError("At least one azimuth direction must be selected")
+
+            # Validate DB source settings
+            if self.data_source_var.get() == 'nina_api_db':
+                db_path = Path(self.nina_api_db_path_entry.get().strip())
+                if not db_path.exists():
+                    raise ValueError(f"NINA_API database not found: {db_path}")
+
+                table_name = self.nina_api_table_entry.get().strip()
+                if not table_name:
+                    raise ValueError("DB table name cannot be empty")
             
             return True
             
@@ -928,6 +1067,16 @@ class TargetSelectorGUI:
             # Reset export paths
             self.nina_export_base_dir_entry.delete(0, tk.END)
             self.nina_export_base_dir_entry.insert(0, str(DEFAULT_CONFIG['export_settings']['nina_export_base_dir']))
+
+            # Reset data source settings
+            self.data_source_var.set(DEFAULT_SOURCE_MODE)
+            self.nina_api_db_path_entry.config(state='normal')
+            self.nina_api_db_path_entry.delete(0, tk.END)
+            self.nina_api_db_path_entry.insert(0, DEFAULT_NINA_API_DB_PATH)
+            self.nina_api_table_entry.config(state='normal')
+            self.nina_api_table_entry.delete(0, tk.END)
+            self.nina_api_table_entry.insert(0, DEFAULT_NINA_API_TABLE)
+            self._on_source_mode_changed()
             
             self.log_message("All parameters reset to defaults", 'info')
             
@@ -1004,7 +1153,10 @@ class TargetSelectorGUI:
                 'max_targets_per_night': int(self.entries['max_targets'].get()),
                 'allowed_azimuths': [az for az, var in self.azimuth_vars.items() if var.get()],
                 'allow_g_targets': self.allow_g_targets_var.get(),
-                'nina_export_base_dir': self.nina_export_base_dir_entry.get()
+                'nina_export_base_dir': self.nina_export_base_dir_entry.get(),
+                'data_source': self.data_source_var.get(),
+                'nina_api_db_path': self.nina_api_db_path_entry.get().strip(),
+                'nina_api_table': self.nina_api_table_entry.get().strip()
             }
             
             # Save configuration to persistent storage
@@ -1036,10 +1188,36 @@ class TargetSelectorGUI:
             findTargets.ALLOW_G_TARGETS = gui_values['allow_g_targets']
             
             self.log_message(f"Configuration: Lat={findTargets.LATITUDE}, Lon={findTargets.LONGITUDE}", 'info')
-            
-            # Fetch predictions
-            self.log_message(f"Fetching predictions for observation date: {self.observation_date.strftime('%Y-%m-%d')}", 'info')
-            self.all_targets = fetch_minima_predictions(obs_date=self.observation_date, use_cache=True)
+
+            # Fetch predictions from selected source
+            source_mode = gui_values['data_source']
+            self.log_message(f"Source mode: {source_mode}", 'info')
+
+            if source_mode == 'nina_api_db':
+                db_path = Path(gui_values['nina_api_db_path']).expanduser()
+                table_name = gui_values['nina_api_table'] or DEFAULT_NINA_API_TABLE
+                self.log_message(
+                    f"Loading minima from NINA_API DB ({db_path}, table={table_name}) for {self.observation_date.strftime('%Y-%m-%d')}...",
+                    'info'
+                )
+
+                db_targets = load_targets_from_db(
+                    db_path=db_path,
+                    table_name=table_name,
+                    obs_date=self.observation_date,
+                    lat=gui_values['latitude'],
+                    lon=gui_values['longitude'],
+                )
+                self.log_message(f"Computed {len(db_targets)} minima events from DB", 'info')
+
+                filtered = apply_basic_filters(db_targets)
+                filtered = filter_targets_by_observation_night(filtered, self.observation_date)
+                filtered = apply_magnitude_filter(filtered)
+                filtered = apply_final_filters(filtered)
+                self.all_targets = filtered
+            else:
+                self.log_message(f"Fetching predictions for observation date: {self.observation_date.strftime('%Y-%m-%d')}", 'info')
+                self.all_targets = fetch_minima_predictions(obs_date=self.observation_date, use_cache=True)
             
             # Stop progress animation after fetch completes
             self.root.after(0, self.stop_progress_animation)
@@ -1056,6 +1234,88 @@ class TargetSelectorGUI:
             # Select optimal targets
             self.root.after(0, lambda: self.update_status("Selecting optimal targets...", COLORS['warning']))
             self.selected_targets = select_targets_for_night(self.all_targets)
+
+            # DB mode fallback: if strict selector returns nothing, pick night-valid minima.
+            if not self.selected_targets and source_mode == 'nina_api_db' and self.all_targets:
+                max_targets = gui_values['max_targets_per_night']
+
+                dark_sky_time = findTargets.calculate_sunset_time(
+                    self.observation_date,
+                    findTargets.LATITUDE,
+                    findTargets.LONGITUDE,
+                    sun_altitude=-15.0,
+                )
+                dark_sky_local = datetime.combine(
+                    self.observation_date,
+                    datetime.strptime(dark_sky_time, "%H:%M").time(),
+                )
+                buffer_time = dark_sky_local - timedelta(minutes=15)
+
+                candidates = []
+                for target in self.all_targets:
+                    minima_utc = parse_minima_time(target.get('minimum_time', ''))
+                    if not minima_utc:
+                        continue
+
+                    minima_local = utc_to_local(minima_utc)
+                    obs_start_local = minima_local - timedelta(hours=2)
+
+                    # Keep only minima that can start near or after dark sky.
+                    if obs_start_local >= buffer_time or obs_start_local.time() < datetime.strptime("06:00", "%H:%M").time():
+                        target['minima_datetime_utc'] = minima_utc
+                        target['minima_datetime_local'] = minima_local
+                        candidates.append(target)
+
+                candidates.sort(key=lambda t: t['minima_datetime_utc'])
+
+                fallback_selected = []
+
+                if candidates:
+                    dawn_time = findTargets.calculate_astronomical_dawn(
+                        self.observation_date,
+                        findTargets.LATITUDE,
+                        findTargets.LONGITUDE,
+                    )
+                    dawn_local = datetime.combine(
+                        self.observation_date + timedelta(days=1),
+                        datetime.strptime(dawn_time, "%H:%M").time(),
+                    )
+
+                    midpoint = dark_sky_local + (dawn_local - dark_sky_local) / 2
+                    first_half_mid = dark_sky_local + (midpoint - dark_sky_local) / 2
+                    second_half_mid = midpoint + (dawn_local - midpoint) / 2
+
+                    first_half = [t for t in candidates if t['minima_datetime_local'] <= midpoint]
+                    second_half = [t for t in candidates if t['minima_datetime_local'] > midpoint]
+
+                    def _closest_by_time(targets, anchor):
+                        return min(targets, key=lambda t: abs(t['minima_datetime_local'] - anchor))
+
+                    if first_half:
+                        fallback_selected.append(_closest_by_time(first_half, first_half_mid))
+
+                    if second_half and len(fallback_selected) < max_targets:
+                        second_pick = _closest_by_time(second_half, second_half_mid)
+                        if second_pick not in fallback_selected:
+                            fallback_selected.append(second_pick)
+
+                    # If one half has no viable candidates, fill from remaining chronologically.
+                    if len(fallback_selected) < max_targets:
+                        for target in candidates:
+                            if target not in fallback_selected:
+                                fallback_selected.append(target)
+                            if len(fallback_selected) >= max_targets:
+                                break
+
+                    fallback_selected.sort(key=lambda t: t['minima_datetime_local'])
+
+                self.selected_targets = fallback_selected
+
+                self.log_message(
+                    f"Strict selector returned 0 targets in DB mode; using split-night fallback selection ({len(self.selected_targets)} target(s)).",
+                    'warning'
+                )
+
             self.log_message(f"Selected {len(self.selected_targets)} targets for tonight", 'success')
             
             if not self.selected_targets:

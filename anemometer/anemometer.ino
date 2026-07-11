@@ -122,12 +122,12 @@ void loop() {
   float wind_ms = (float(adc) - WIND_ADC_MIN) / (WIND_ADC_MAX - WIND_ADC_MIN) * WIND_MAX_MS;
   wind_ms = constrain(wind_ms, 0.0, WIND_MAX_MS);
 
-  // Print a concise, human-readable line
-  //Serial.print("ADC="); Serial.print(adc);
-  //Serial.print("  V_adc="); Serial.print(v_adc, 3); Serial.print("V");
-  //Serial.print("  V_sense="); Serial.print(v_sense, 3); Serial.print("V");
-  //Serial.print("  I="); Serial.print(current_mA, 2); Serial.print(" mA");
-  //Serial.print("  Wind="); Serial.print(wind_ms, 1); Serial.println(" m/s");
+  // Print dets
+  Serial.print("ADC="); Serial.print(adc);
+  Serial.print("  V_adc="); Serial.print(v_adc, 3); Serial.print("V");
+  Serial.print("  V_sense="); Serial.print(v_sense, 3); Serial.print("V");
+  Serial.print("  I="); Serial.print(current_mA, 2); Serial.print(" mA");
+  Serial.print("  Wind="); Serial.print(wind_ms, 1); Serial.println(" m/s");
 
   // Publish to MQTT every PUBLISH_INTERVAL_MS
   unsigned long now = millis();
@@ -140,5 +140,5 @@ void loop() {
     Serial.println(ok ? " OK" : " FAILED");
   }
 
-  delay(200);
+  delay(1000);
 }

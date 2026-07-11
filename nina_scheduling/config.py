@@ -43,6 +43,11 @@ DEFAULT_CONFIG = {
     "target_constraints": {
         "allow_g_targets": True
     },
+    "data_source_settings": {
+        "source": "varastro",
+        "nina_api_db_path": "..\\..\\NINA_API\\varcz_eb.db",
+        "nina_api_table": "stars"
+    },
     "export_settings": {
         "nina_export_base_dir": r"C:\Users\aegis\Documents\N.I.N.A\Targets\VarStars"
     }
@@ -147,5 +152,15 @@ def update_config_from_gui_values(gui_values):
     # Update export settings
     if 'nina_export_base_dir' in gui_values:
         config['export_settings']['nina_export_base_dir'] = gui_values['nina_export_base_dir']
+
+    # Update source settings
+    if 'data_source_settings' not in config:
+        config['data_source_settings'] = DEFAULT_CONFIG['data_source_settings'].copy()
+    if 'data_source' in gui_values:
+        config['data_source_settings']['source'] = gui_values['data_source']
+    if 'nina_api_db_path' in gui_values:
+        config['data_source_settings']['nina_api_db_path'] = gui_values['nina_api_db_path']
+    if 'nina_api_table' in gui_values:
+        config['data_source_settings']['nina_api_table'] = gui_values['nina_api_table']
     
     return save_config(config)
