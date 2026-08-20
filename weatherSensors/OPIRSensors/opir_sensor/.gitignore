@@ -1,0 +1,8 @@
+# Arduino secrets file containing WiFi and MQTT credentials
+arduino_secrets.h
+
+# Arduino build artifacts
+*.hex
+*.elf
+*.bin
+*.map
