@@ -5,7 +5,7 @@ import traceback
 from pathlib import Path
 import serial.tools.list_ports
 
-SERIAL_PORT = 'COM7'  # Change to your port, e.g., '/dev/ttyUSB0' on Linux
+SERIAL_PORT = 'COM8'  # Change to your port, e.g., '/dev/ttyUSB0' on Linux
 BAUDRATE = 9600
 LOG_FILE = Path(__file__).with_name('openClose.log')
 
