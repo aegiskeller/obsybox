@@ -5,6 +5,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_TSL2591.h>
 #include <Adafruit_MLX90614.h>
+#include <Adafruit_AHTX0.h>
 #include "arduino_secrets.h"
 
 // WiFi credentials
@@ -22,14 +23,18 @@ PubSubClient mqttClient(wifiClient);
 // Sensor objects
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+Adafruit_AHTX0 aht10;
 
 // Non-blocking MQTT reconnect variables
 unsigned long lastMqttReconnectAttempt = 0;
 const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
+unsigned long mqttDisconnectedSince = 0;
+const unsigned long mqttResetTimeout = 180000; // Reset after 3 minutes disconnected
 
 // Sensor error flags
 bool tslSensorOk = false;
 bool mlxSensorOk = false;
+bool ahtSensorOk = false;
 
 // Built-in LED feedback for each MQTT publish
 const uint8_t MQTT_LED_PIN = LED_BUILTIN;
@@ -112,6 +117,13 @@ void setup() {
   mlxSensorOk = mlx.begin();
   if (!mlxSensorOk) {
     Serial.println("MLX90614 not found. Check wiring!");
+  }
+
+  ahtSensorOk = aht10.begin();
+  if (!ahtSensorOk) {
+    Serial.println("AHT10 not found. Check wiring!");
+  } else {
+    Serial.println("AHT10 initialized");
   }
 
   // Only configure sensors that are present
@@ -233,12 +245,22 @@ void loop() {
   // Non-blocking MQTT reconnection
   if (!mqttClient.connected()) {
     unsigned long now = millis();
+
+    if (mqttDisconnectedSince == 0) {
+      mqttDisconnectedSince = now;
+    } else if (now - mqttDisconnectedSince >= mqttResetTimeout) {
+      Serial.println("MQTT disconnected for 3 minutes. Restarting device...");
+      Serial.flush();
+      delay(100);
+      ESP.restart();
+    }
     
     if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
       lastMqttReconnectAttempt = now;
       Serial.print("Attempting MQTT connection...");
       if (mqttClient.connect("OPIR_ESP8266")) {
         Serial.println("connected");
+        mqttDisconnectedSince = 0;
       } else {
         Serial.print("failed, rc=");
         Serial.print(mqttClient.state());
@@ -246,6 +268,7 @@ void loop() {
       }
     }
   } else {
+    mqttDisconnectedSince = 0;
     mqttClient.loop();
   }
   
@@ -270,6 +293,13 @@ void loop() {
         Serial.println("MLX90614 sensor reconnected");
       }
     }
+
+    if (!ahtSensorOk) {
+      ahtSensorOk = aht10.begin();
+      if (ahtSensorOk) {
+        Serial.println("AHT10 sensor reconnected");
+      }
+    }
   }
 
   // Adaptive gain control for TSL2591
@@ -286,6 +316,8 @@ void loop() {
     float lux = 0.0;
     float objTemp = 0.0;
     float ambTemp = 0.0;
+    float ahtTemp = 0.0;
+    float ahtHumidity = 0.0;
     uint16_t ir = 0;
     uint16_t full = 0;
     
@@ -304,16 +336,25 @@ void loop() {
       ambTemp = mlx.readAmbientTempC();
     }
 
+    if (ahtSensorOk) {
+      sensors_event_t humidity, temp;
+      aht10.getEvent(&humidity, &temp);
+      ahtTemp = temp.temperature;
+      ahtHumidity = humidity.relative_humidity;
+    }
+
     char payload[256];
     snprintf(payload, sizeof(payload),
-      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"tsl_gain\":%d}",
-      lux, objTemp, ambTemp, (int)currentGain);
+      "{\"lux\":%.2f,\"sky\":%.2f,\"ambient\":%.2f,\"aht_temp\":%.2f,\"aht_humidity\":%.2f,\"tsl_gain\":%d}",
+      lux, objTemp, ambTemp, ahtTemp, ahtHumidity, (int)currentGain);
 
     // Print sensor values to serial
     Serial.println("--- Sensor Reading ---");
     Serial.print("Lux: "); Serial.println(lux, 2);
     Serial.print("Sky Temp: "); Serial.print(objTemp, 2); Serial.println(" °C");
     Serial.print("Ambient Temp: "); Serial.print(ambTemp, 2); Serial.println(" °C");
+    Serial.print("AHT10 Temp: "); Serial.print(ahtTemp, 2); Serial.println(" °C");
+    Serial.print("AHT10 Humidity: "); Serial.print(ahtHumidity, 2); Serial.println(" %");
     
     String gainStr = "N/A";
     if (tslSensorOk) {
