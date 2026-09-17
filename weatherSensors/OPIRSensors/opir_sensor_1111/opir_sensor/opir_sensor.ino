@@ -14,7 +14,9 @@ const char* password = SECRET_PASS;
 
 // MQTT settings
 const char* mqtt_server = MQTT_SERVER;
-const int mqtt_port = 1883;
+const int mqtt_port = MQTT_PORT;
+const char* mqtt_user = MQTT_USER;
+const char* mqtt_pass = MQTT_PASS;
 const char* mqtt_topic = "obsybox/opir_sensor";
 
 WiFiClient wifiClient;
@@ -28,6 +30,8 @@ Adafruit_AHTX0 aht10;
 // Non-blocking MQTT reconnect variables
 unsigned long lastMqttReconnectAttempt = 0;
 const unsigned long mqttReconnectInterval = 5000; // 5 seconds between attempts
+unsigned long lastWifiReconnectAttempt = 0;
+const unsigned long wifiReconnectInterval = 10000; // 10 seconds between attempts
 unsigned long mqttDisconnectedSince = 0;
 const unsigned long mqttResetTimeout = 180000; // Reset after 3 minutes disconnected
 
@@ -68,7 +72,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
 
   // Static IP configuration 
-  IPAddress local_IP(192, 168, 1, 101);
+  IPAddress local_IP(STATIC_IP);
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
   //IPAddress dns(8, 8, 8, 8);
@@ -102,8 +106,12 @@ void setup() {
       Serial.println("\nAll WiFi connection attempts failed. Continuing without reset.");
     }
   }
-  Serial.println("\nWiFi connected. IP address: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected. IP address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi not connected. Will retry in the main loop.");
+  }
 
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setBufferSize(512);
@@ -242,23 +250,34 @@ void adaptTSLGain() {
 unsigned long lastMqttPublish = 0;
 
 void loop() {
-  // Non-blocking MQTT reconnection
-  if (!mqttClient.connected()) {
-    unsigned long now = millis();
+  unsigned long networkNow = millis();
 
+  if (!mqttClient.connected()) {
     if (mqttDisconnectedSince == 0) {
-      mqttDisconnectedSince = now;
-    } else if (now - mqttDisconnectedSince >= mqttResetTimeout) {
-      Serial.println("MQTT disconnected for 3 minutes. Restarting device...");
+      mqttDisconnectedSince = networkNow;
+    } else if (networkNow - mqttDisconnectedSince >= mqttResetTimeout) {
+      Serial.println("Network/MQTT unavailable for 3 minutes. Restarting device...");
       Serial.flush();
       delay(100);
       ESP.restart();
     }
-    
-    if (now - lastMqttReconnectAttempt > mqttReconnectInterval) {
-      lastMqttReconnectAttempt = now;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    if (networkNow - lastWifiReconnectAttempt >= wifiReconnectInterval) {
+      lastWifiReconnectAttempt = networkNow;
+      Serial.println("WiFi disconnected, attempting reconnect...");
+      WiFi.reconnect();
+    }
+  } else if (!mqttClient.connected()) {
+    if (networkNow - lastMqttReconnectAttempt > mqttReconnectInterval) {
+      lastMqttReconnectAttempt = networkNow;
       Serial.print("Attempting MQTT connection...");
-      if (mqttClient.connect("OPIR_ESP8266")) {
+      String clientId = "OPIR_ESP8266-" + String(ESP.getChipId(), HEX);
+      bool connected = strlen(mqtt_user) > 0
+        ? mqttClient.connect(clientId.c_str(), mqtt_user, mqtt_pass)
+        : mqttClient.connect(clientId.c_str());
+      if (connected) {
         Serial.println("connected");
         mqttDisconnectedSince = 0;
       } else {
